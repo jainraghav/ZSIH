@@ -81,16 +81,16 @@ def train(epoch,train_loader,logger):
         logger.add_scalar('loss_train', float(loss.item()))
         logger.step()
 
-def test(test_loader):
+def test(test_loader,logger):
     model.eval()
     for data in test_loader:
         images, labels = data
         output,attn = model(Variable(images).cuda())
-        tflog(attn,images)
+        tflog(attn,images,logger)
         _,predicted = torch.max(output,1)
         break
 
-def tflog(attn,images):
+def tflog(attn,images,logger):
     b = vutils.make_grid(attn[0], normalize=True, scale_each=True)
     bn = (b-b.min())
     bn = bn/bn.max()
