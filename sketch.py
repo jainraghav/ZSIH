@@ -22,7 +22,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 #Own modules
 from Logger import LogMetric
-
+from Models import net
 
 IMG_PATH = 'TU-Berlin-sketch/'
 IMG_EXT = '.png'
@@ -30,12 +30,6 @@ TRAIN_DATA = 'TU-Berlin-sketch/filelist.txt'
 
 # Testing code is commented out
 class SketchDataset(Dataset):
-    """Arguments:
-        CSV filepaths
-        Path to img folder
-        Extension of images
-        PIL Transforms
-    """
     def __init__(self, csv_path, img_path, img_ext, transform=None):
 
         tmp_df = pd.read_csv(csv_path)
@@ -122,44 +116,7 @@ binary_encoder = nn.Sequential(
     nn.Linear(H, 250)
 )
 
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        # Layers to follow here
-        self.alex = new_model
-        self.attn = attn_model
-
-        self.encoder = binary_encoder
-
-    def forward(self, x):
-        # Functions on layers to follow here
-        # print(x.size()) #Size here is [256,3,224,224]
-
-        x = self.alex(x)
-        # print(x.size()) #Size here is [256,256,13,13]
-
-        '''Attention Model after here'''
-        #pdb.set_trace()
-        attn_mask = self.attn(x)
-        attn_mask = attn_mask.view(attn_mask.size(0),-1)
-        attn_mask = nn.Softmax(dim=1)(attn_mask)
-        attn_mask = attn_mask.view(attn_mask.size(0),1,x.size(2),x.size(3))
- 
-        #print(x.size(),attn_mask.size()) #Size here is [256,256,13,13]
-        #print(attn_mask)
-
-        x = x+x*attn_mask
-        # print(x.size())
-
-        x = x.sum(2).sum(2)
-        # print(x.size()) #Size here is [256,256]
-
-        x = self.encoder(x)
-        # print(x.size()) #Size here is [256,250]
-
-        return x,attn_mask
-
-model = Net().cuda()
+model = net.Net(new_model,attn_model,binary_encoder).cuda()
 print(model)
 
 optimizer = optim.SGD(model.parameters(), lr=0.00001, momentum=0.5)
@@ -183,35 +140,36 @@ def train(epoch):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         logger.add_scalar('loss_train', float(loss.item()))
+        logger.step()
 
 def test():
-	model.eval()
-	for data in test_loader:
-		images, labels = data
-		output,attn = model(Variable(images).cuda())
-		b = vutils.make_grid(attn[0], normalize=True, scale_each=True)
-		bn = (b-b.min())
-		bn = bn/bn.max()
-		c = vutils.make_grid(images[0], normalize=True, scale_each=True)
-		d = vutils.make_grid(attn[81], normalize=True, scale_each=True)
-		dn = (d-d.min())
-		dn = dn/dn.max()
-		e = vutils.make_grid(images[81], normalize=True, scale_each=True)
-		logger.add_image('Attention_mask1', bn)
-		logger.add_image('Image1', c)
-		logger.add_image('Attention_mask2', dn)
-		logger.add_image('Image2', e)
-		
-		_,predicted = torch.max(output,1)
-		break
+    model.eval()
+    for data in test_loader:
+        images, labels = data
+        output,attn = model(Variable(images).cuda())
+        tflog(attn,images)
+        _,predicted = torch.max(output,1)
+        break
 
-		
+def tflog(attn,images):
+    b = vutils.make_grid(attn[0], normalize=True, scale_each=True)
+    bn = (b-b.min())
+    bn = bn/bn.max()
+    c = vutils.make_grid(images[0], normalize=True, scale_each=True)
+    d = vutils.make_grid(attn[81], normalize=True, scale_each=True)
+    dn = (d-d.min())
+    dn = dn/dn.max()
+    e = vutils.make_grid(images[81], normalize=True, scale_each=True)
+    logger.add_image('Attention_mask1', bn)
+    logger.add_image('Image1', c)
+    logger.add_image('Attention_mask2', dn)
+    logger.add_image('Image2', e)
+
 num_epochs = 10
 log_dir = 'Log/'
-logger = LogMetric.Logger(log_dir, force=True) 
-for epoch in range(1, num_epochs):    
+logger = LogMetric.Logger(log_dir, force=True)
+for epoch in range(1, num_epochs):
     train(epoch)
     test()
-#test()
 
 print("End of training !")
