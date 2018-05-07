@@ -20,12 +20,15 @@ from numpy import array
 #Own modules
 from Logger import LogMetric
 from Models import net
-from Datasets.load_dataset import SketchDataset
+from Datasets.load_sketchdataset import SketchDataset
 
 
 IMG_PATH = 'TU-Berlin-sketch/'
 IMG_EXT = '.png'
-TRAIN_DATA = 'TU-Berlin-sketch/filelist.txt'
+ALL_DATA = 'TU-Berlin-sketch/filelist.txt'
+TRAIN_DATA = 'TU-Berlin-sketch/filelist-train.txt'
+TEST_DATA = 'TU-Berlin-sketch/filelist-test.txt'
+VALID_DATA = 'TU-Berlin-sketch/filelist-valid.txt'
 
 def preprocess_networklayers(attention_hl,encoder_hl):
     #AlexNet
@@ -44,15 +47,26 @@ def preprocess_networklayers(attention_hl,encoder_hl):
                               nn.Conv2d(attn_hidden_layer,1, kernel_size=1)
                               )
     #print(attn_model)
-
     #Binary encoder
     H = encoder_hl
     binary_encoder = nn.Sequential(
         nn.Linear(256, H),
         nn.Linear(H, 250)
     )
-
     return new_model,attn_model,binary_encoder
+
+def line_prepender(filename, line):
+    with open(filename, 'r+') as f:
+        content = f.read()
+        f.seek(0, 0)
+        f.write(line.rstrip('\r\n') + '\n' + content)
+
+def divide_into_sets(all_classes,trainp,validp,testp):
+    all = list(all_classes)
+    train_set = all[:int(trainp*len(all))]
+    valid_set = all[int(trainp*len(all))+1:int(trainp*len(all))+1+int(validp*len(all))]
+    test_set = all[int(trainp*len(all))+1+int(validp*len(all)):]
+    return train_set,valid_set,test_set
 
 mod_alex,attn_model,binary_encoder = preprocess_networklayers(attention_hl=380,encoder_hl=512)
 model = net.Net(mod_alex,attn_model,binary_encoder).cuda()
@@ -81,7 +95,29 @@ def train(epoch,train_loader,logger):
         logger.add_scalar('loss_train', float(loss.item()))
         logger.step()
 
-def test(test_loader,logger):
+def validate(valid_loader):
+    model.eval()
+    correct=0
+    total=0
+    for data in valid_loader:
+        images, labels = data
+        labels = labels.cuda()
+        output,attn = model(Variable(images).cuda())
+        _,predicted = torch.max(output,1)
+        c = (predicted == labels).squeeze()
+        #print(c,c.size())
+        correct+=(c.sum(0).sum(0)).item()
+
+    print("Accuracy=",correct/12000)
+
+def test(test_loader):
+    model.eval()
+    for data in test_loader:
+        images, labels = data
+        output,attn = model(Variable(images).cuda())
+        _,predicted = torch.max(output,1)
+
+def log(test_loader,logger):
     model.eval()
     for data in test_loader:
         images, labels = data
@@ -104,19 +140,58 @@ def tflog(attn,images,logger):
     logger.add_image('Attention_mask2', dn)
     logger.add_image('Image2', e)
 
+def create_seperate_files(train_set,valid_set,test_set):
+
+    with open(ALL_DATA) as f:
+        with open(TRAIN_DATA, "w") as f1:
+            f1.write("ImagePath\n")
+            for line in f:
+                if line.split('/')[0] in train_set:
+                    f1.write(line)
+
+    with open(ALL_DATA) as f:
+        with open(TEST_DATA, "w") as f1:
+            f1.write("ImagePath\n")
+            for line in f:
+                if line.split('/')[0] in test_set:
+                    f1.write(line)
+
+    with open(ALL_DATA) as f:
+        with open(VALID_DATA, "w") as f1:
+            f1.write("ImagePath\n")
+            for line in f:
+                if line.split('/')[0] in valid_set:
+                    f1.write(line)
+
 def main():
+    line_prepender(ALL_DATA,"ImagePath")
+    tmp_df = pd.read_csv(ALL_DATA)
+    arr = tmp_df['ImagePath'].str.partition('/')[0].values.tolist()
+    all_classes = set(arr)
+    train_set,valid_set,test_set = divide_into_sets(all_classes,0.6,0.2,0.2)
+    create_seperate_files(train_set,valid_set,test_set)
+
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchDataset(TRAIN_DATA,IMG_PATH,IMG_EXT,transformations)
+    dset_test = SketchDataset(TEST_DATA,IMG_PATH,IMG_EXT,transformations)
+    dset_valid = SketchDataset(VALID_DATA,IMG_PATH,IMG_EXT,transformations)
 
     train_loader = DataLoader(dset_train,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
-    test_loader = DataLoader(dset_train,batch_size=256,shuffle=False,num_workers=2,pin_memory=True)
+    test_loader = DataLoader(dset_test,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
+    valid_loader = DataLoader(dset_valid,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
+
+
+    logging_loader = DataLoader(dset_train,batch_size=256,shuffle=False,num_workers=2,pin_memory=True)
 
     num_epochs = 30
     log_dir = 'Log/'
     logger = LogMetric.Logger(log_dir, force=True)
     for epoch in range(1, num_epochs):
         train(epoch,train_loader,logger)
-        test(test_loader)
+        validate(train_loader)
+        #validate(valid_loader)
+        #test(test_loader)
+        log(logging_loader,logger)
     print("End of training !")
 
 if __name__ == '__main__':
