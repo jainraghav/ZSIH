@@ -1,3 +1,7 @@
+"""
+Sketch Data Loader
+"""
+
 import torch
 from torch.utils.data.dataset import Dataset
 
@@ -26,7 +30,6 @@ class SketchDataset(Dataset):
 
         label_encoder = LabelEncoder()
         integer_encoded = label_encoder.fit_transform(values)
-        # binary encode
 
         #print(integer_encoded)
         onehot_encoder = OneHotEncoder(sparse=False)

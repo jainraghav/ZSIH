@@ -17,10 +17,10 @@ class Net(nn.Module):
 
     def forward(self, x):
         # Functions on layers to follow here
-        # print(x.size()) #Size here is [256,3,224,224]
-
+        #print(x.size()) #Size here is [256,3,224,224]
+        #import pdb; pdb.set_trace()
         x = self.alex(x)
-        # print(x.size()) #Size here is [256,256,13,13]
+        #print(x.size()) #Size here is [256,256,13,13]
 
         '''Attention Model after here'''
         #pdb.set_trace()
@@ -32,7 +32,7 @@ class Net(nn.Module):
         #print(x.size(),attn_mask.size()) #Size here is [256,256,13,13]
         #print(attn_mask)
 
-        x = x+x*attn_mask
+        x = x*attn_mask
         # print(x.size())
 
         x = x.sum(2).sum(2)

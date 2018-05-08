@@ -61,20 +61,7 @@ def line_prepender(filename, line):
         f.seek(0, 0)
         f.write(line.rstrip('\r\n') + '\n' + content)
 
-def divide_into_sets(all_classes,trainp,validp,testp):
-    all = list(all_classes)
-    train_set = all[:int(trainp*len(all))]
-    valid_set = all[int(trainp*len(all))+1:int(trainp*len(all))+1+int(validp*len(all))]
-    test_set = all[int(trainp*len(all))+1+int(validp*len(all)):]
-    return train_set,valid_set,test_set
-
-mod_alex,attn_model,binary_encoder = preprocess_networklayers(attention_hl=380,encoder_hl=512)
-model = net.Net(mod_alex,attn_model,binary_encoder).cuda()
-print(model)
-
-optimizer = optim.SGD(model.parameters(), lr=0.00001, momentum=0.5)
-
-def train(epoch,train_loader,logger):
+def train(model,optimizer,epoch,train_loader,logger):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = Variable(data).cuda(), Variable(target).cuda()
@@ -93,29 +80,24 @@ def train(epoch,train_loader,logger):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         logger.add_scalar('loss_train', float(loss.item()))
-        logger.step()
 
-def validate(valid_loader):
+def validate(model,valid_loader,logger):
     model.eval()
     correct=0
     total=0
-    for data in valid_loader:
-        images, labels = data
-        labels = labels.cuda()
-        output,attn = model(Variable(images).cuda())
-        _,predicted = torch.max(output,1)
-        c = (predicted == labels).squeeze()
-        #print(c,c.size())
-        correct+=(c.sum(0).sum(0)).item()
-
-    print("Accuracy=",correct/12000)
-
-def test(test_loader):
-    model.eval()
-    for data in test_loader:
-        images, labels = data
-        output,attn = model(Variable(images).cuda())
-        _,predicted = torch.max(output,1)
+    with torch.no_grad():
+        for data in valid_loader:
+            images, labels = data
+            labels = labels.cuda()
+            output,attn = model(Variable(images).cuda())
+            _,predicted = torch.max(output,1)
+            for i in range(len(images)):
+                a,b = predicted[i].item(),labels[i].item()
+                total+=1
+                if a==b:
+                    correct+=1
+    acc = (correct/total)*100
+    return acc
 
 def log(test_loader,logger):
     model.eval()
@@ -140,7 +122,16 @@ def tflog(attn,images,logger):
     logger.add_image('Attention_mask2', dn)
     logger.add_image('Image2', e)
 
-def create_seperate_files(train_set,valid_set,test_set):
+#for zero-shot learning task
+def divide_into_sets_disjointclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
+
+    tmp_df = pd.read_csv(ALL_DATA)
+    arr = tmp_df['ImagePath'].str.partition('/')[0].values.tolist()
+    all_classes = set(arr)
+    all = list(all_classes)
+    train_set = all[:int(trainp*len(all))]
+    valid_set = all[int(trainp*len(all))+1:int(trainp*len(all))+1+int(validp*len(all))]
+    test_set = all[int(trainp*len(all))+1+int(validp*len(all)):]
 
     with open(ALL_DATA) as f:
         with open(TRAIN_DATA, "w") as f1:
@@ -163,13 +154,43 @@ def create_seperate_files(train_set,valid_set,test_set):
                 if line.split('/')[0] in valid_set:
                     f1.write(line)
 
-def main():
-    line_prepender(ALL_DATA,"ImagePath")
+#for normal classification learning task
+def divide_into_sets_allclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
+    train_set=[]
+    valid_set=[]
+    test_set=[]
     tmp_df = pd.read_csv(ALL_DATA)
-    arr = tmp_df['ImagePath'].str.partition('/')[0].values.tolist()
-    all_classes = set(arr)
-    train_set,valid_set,test_set = divide_into_sets(all_classes,0.6,0.2,0.2)
-    create_seperate_files(train_set,valid_set,test_set)
+    classes = list(set(tmp_df['ImagePath'].str.partition('/')[0].values.tolist()))
+    arr = tmp_df['ImagePath'].values.tolist()
+    for x in classes:
+        temp_one_class=[]
+        for im in arr:
+            if im.split('/')[0]==x:
+                temp_one_class.append(im)
+        train_set = train_set + temp_one_class[:int(trainp*len(temp_one_class))]
+        valid_set = valid_set + temp_one_class[int(trainp*len(temp_one_class)) : int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class))]
+        test_set = test_set + temp_one_class[int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class)) : ]
+
+    #print(classes)
+    with open(TRAIN_DATA, "w") as f1:
+        f1.write("ImagePath\n")
+        for line in train_set:
+            f1.write(line+"\n")
+
+    with open(TEST_DATA, "w") as f1:
+        f1.write("ImagePath\n")
+        for line in test_set:
+            f1.write(line+"\n")
+
+    with open(VALID_DATA, "w") as f1:
+        f1.write("ImagePath\n")
+        for line in valid_set:
+            f1.write(line+"\n")
+
+def main():
+
+    #divide_into_sets_disjointclasses(ALL_DATA)
+    divide_into_sets_allclasses(ALL_DATA)
 
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchDataset(TRAIN_DATA,IMG_PATH,IMG_EXT,transformations)
@@ -183,15 +204,31 @@ def main():
 
     logging_loader = DataLoader(dset_train,batch_size=256,shuffle=False,num_workers=2,pin_memory=True)
 
+    mod_alex,attn_model,binary_encoder = preprocess_networklayers(attention_hl=380,encoder_hl=512)
+    model = net.Net(mod_alex,attn_model,binary_encoder).cuda()
+    print(model)
+
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+
+
     num_epochs = 30
     log_dir = 'Log/'
     logger = LogMetric.Logger(log_dir, force=True)
     for epoch in range(1, num_epochs):
-        train(epoch,train_loader,logger)
-        validate(train_loader)
+        train(model,optimizer,epoch,train_loader,logger)
+        train_acc = validate(model,train_loader,logger)
+        print("Training Accuracy=",train_acc,"%")
+        valid_acc = validate(model,valid_loader,logger)
+        print("Validation Accuracy=",valid_acc,"%")
+        test_acc = validate(model,test_loader,logger)
+        print("Test Accuracy=",test_acc,"%")
+
+        logger.add_scalar('Train_Accuracy', train_acc)
+        logger.add_scalar('Test_Accuracy', test_acc)
+        logger.add_scalar('Valid_Accuracy', valid_acc)
+        logger.step()
         #validate(valid_loader)
-        #test(test_loader)
-        log(logging_loader,logger)
+        #log(logging_loader,logger)
     print("End of training !")
 
 if __name__ == '__main__':
