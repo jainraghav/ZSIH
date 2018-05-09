@@ -148,7 +148,7 @@ def divide_into_sets_disjointclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,tr
                     f1.write(line)
 
 #for normal classification learning task
-def divide_into_sets_allclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,trainp=0.6,validp=0.2,testp=0.2):
+def divide_into_sets_allclasses(ALL_DATA,IMG_PATH,trainp=0.6,validp=0.2,testp=0.2):
     train_set=[]
     valid_set=[]
     test_set=[]
@@ -165,20 +165,25 @@ def divide_into_sets_allclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,trainp=
         test_set = test_set + temp_one_class[int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class)) : ]
 
     #print(classes)
+    TRAIN_DATA = IMG_PATH + "filelist-train.txt"
     with open(TRAIN_DATA, "w") as f1:
         f1.write("ImagePath\n")
         for line in train_set:
             f1.write(line+"\n")
 
+    TEST_DATA = IMG_PATH + "filelist-test.txt"
     with open(TEST_DATA, "w") as f1:
         f1.write("ImagePath\n")
         for line in test_set:
             f1.write(line+"\n")
 
+    VALID_DATA = IMG_PATH + "filelist-valid.txt"
     with open(VALID_DATA, "w") as f1:
         f1.write("ImagePath\n")
         for line in valid_set:
             f1.write(line+"\n")
+
+    return TRAIN_DATA,TEST_DATA,VALID_DATA
 
 def preprocess_img_folder(IMG_PATH,ALL_DATA):
 
@@ -196,9 +201,9 @@ def preprocess_img_folder(IMG_PATH,ALL_DATA):
         for line in all_image_path_set:
             f1.write(line+"\n")
 
-def train_encoder_network(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,IMG_PATH,IMG_EXT):
+def train_encoder_network_as_classifier(ALL_DATA,IMG_PATH,IMG_EXT):
 
-    divide_into_sets_allclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA)
+    TRAIN_DATA,TEST_DATA,VALID_DATA = divide_into_sets_allclasses(ALL_DATA,IMG_PATH)
 
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchDataset(TRAIN_DATA,IMG_PATH,IMG_EXT,transformations)
@@ -213,6 +218,7 @@ def train_encoder_network(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,IMG_PATH,IMG_
     logging_loader = DataLoader(dset_train,batch_size=256,shuffle=False,num_workers=2,pin_memory=True)
 
     mod_alex,attn_model,binary_encoder = preprocess_networklayers(attention_hl=380,encoder_hl=512)
+
     model = net.Net(mod_alex,attn_model,binary_encoder).cuda()
     print(model)
 
@@ -237,6 +243,9 @@ def train_encoder_network(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,IMG_PATH,IMG_
         #log(logging_loader,logger)
     print("End of training !")
 
+#def train_encoder_network_combined():
+
+
 def main_classifier():
 
     #Zero-Shot Learning divide
@@ -245,24 +254,21 @@ def main_classifier():
     # Parse options
     args = Options().parse()
     #Train Image Model
-
     preprocess_img_folder(args.img_path,args.img_all_data)
-    divide_into_sets_allclasses(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data)
-    train_encoder_network(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data,args.img_path,args.img_ext)
-
+    train_encoder_network_as_classifier(args.img_all_data,args.img_path,args.img_ext)
 
     #Train Sketch Model
-
-    # divide_into_sets_allclasses(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data)
-    # train_encoder_network(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data,args.sketch_path,args.sketch_ext)
+    # train_encoder_network_as_classifier(args.sketch_all_data,args.sketch_path,args.sketch_ext)
 
 def main_encoder():
     #Preprocessing / creating train-test-valid from data
-    #Image
+    #Image-Sketch Model
     preprocess_img_folder(args.img_path,args.img_all_data)
-    divide_into_sets_allclasses(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data)
-    #Sketch
-    divide_into_sets_allclasses(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data)
+    #train_encoder_network_combined()
+
+
+
+
 
 
 
