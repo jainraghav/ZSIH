@@ -20,15 +20,8 @@ from numpy import array
 #Own modules
 from Logger import LogMetric
 from Models import net
+from options import Options
 from Datasets.load_sketchdataset import SketchDataset
-
-
-IMG_PATH = 'TU-Berlin-sketch/'
-IMG_EXT = '.png'
-ALL_DATA = 'TU-Berlin-sketch/filelist.txt'
-TRAIN_DATA = 'TU-Berlin-sketch/filelist-train.txt'
-TEST_DATA = 'TU-Berlin-sketch/filelist-test.txt'
-VALID_DATA = 'TU-Berlin-sketch/filelist-valid.txt'
 
 def preprocess_networklayers(attention_hl,encoder_hl):
     #AlexNet
@@ -68,8 +61,7 @@ def train(model,optimizer,epoch,train_loader,logger):
         target = target.type('torch.cuda.LongTensor')
         # print(data.size(),target.size())
         optimizer.zero_grad()
-        output,attn = model(data)
-        #logger.add_image('Image', output)
+        output,multimodal_input,attn = model(data)
         # print(output)
         target = target.squeeze_()
         loss = F.cross_entropy(output, target)
@@ -80,6 +72,7 @@ def train(model,optimizer,epoch,train_loader,logger):
                 epoch, batch_idx * len(data), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         logger.add_scalar('loss_train', float(loss.item()))
+        logger.step()
 
 def validate(model,valid_loader,logger):
     model.eval()
@@ -89,7 +82,7 @@ def validate(model,valid_loader,logger):
         for data in valid_loader:
             images, labels = data
             labels = labels.cuda()
-            output,attn = model(Variable(images).cuda())
+            output,multimodal_input,attn = model(Variable(images).cuda())
             _,predicted = torch.max(output,1)
             for i in range(len(images)):
                 a,b = predicted[i].item(),labels[i].item()
@@ -103,7 +96,7 @@ def log(test_loader,logger):
     model.eval()
     for data in test_loader:
         images, labels = data
-        output,attn = model(Variable(images).cuda())
+        output,multimodal_input,attn = model(Variable(images).cuda())
         tflog(attn,images,logger)
         _,predicted = torch.max(output,1)
         break
@@ -123,7 +116,7 @@ def tflog(attn,images,logger):
     logger.add_image('Image2', e)
 
 #for zero-shot learning task
-def divide_into_sets_disjointclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
+def divide_into_sets_disjointclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,trainp=0.6,validp=0.2,testp=0.2):
 
     tmp_df = pd.read_csv(ALL_DATA)
     arr = tmp_df['ImagePath'].str.partition('/')[0].values.tolist()
@@ -155,7 +148,7 @@ def divide_into_sets_disjointclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
                     f1.write(line)
 
 #for normal classification learning task
-def divide_into_sets_allclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
+def divide_into_sets_allclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,trainp=0.6,validp=0.2,testp=0.2):
     train_set=[]
     valid_set=[]
     test_set=[]
@@ -187,10 +180,25 @@ def divide_into_sets_allclasses(ALL_DATA,trainp=0.6,validp=0.2,testp=0.2):
         for line in valid_set:
             f1.write(line+"\n")
 
-def main():
+def preprocess_img_folder(IMG_PATH,ALL_DATA):
 
-    #divide_into_sets_disjointclasses(ALL_DATA)
-    divide_into_sets_allclasses(ALL_DATA)
+    all_image_classes = os.listdir(IMG_PATH)
+    all_image_path_set = []
+
+    for cl in all_image_classes:
+        if os.path.isdir(IMG_PATH + cl + '/'):
+            class_files = os.listdir(IMG_PATH + cl + '/')
+            refined_class_files = [cl+'/'+x for x in class_files]
+            all_image_path_set = all_image_path_set + refined_class_files
+
+    with open(ALL_DATA, "w") as f1:
+        f1.write("ImagePath\n")
+        for line in all_image_path_set:
+            f1.write(line+"\n")
+
+def train_encoder_network(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA,IMG_PATH,IMG_EXT):
+
+    divide_into_sets_allclasses(ALL_DATA,TRAIN_DATA,TEST_DATA,VALID_DATA)
 
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchDataset(TRAIN_DATA,IMG_PATH,IMG_EXT,transformations)
@@ -210,8 +218,7 @@ def main():
 
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
 
-
-    num_epochs = 30
+    num_epochs = 10
     log_dir = 'Log/'
     logger = LogMetric.Logger(log_dir, force=True)
     for epoch in range(1, num_epochs):
@@ -226,10 +233,40 @@ def main():
         logger.add_scalar('Train_Accuracy', train_acc)
         logger.add_scalar('Test_Accuracy', test_acc)
         logger.add_scalar('Valid_Accuracy', valid_acc)
-        logger.step()
         #validate(valid_loader)
         #log(logging_loader,logger)
     print("End of training !")
 
+def main_classifier():
+
+    #Zero-Shot Learning divide
+    #divide_into_sets_disjointclasses(ALL_DATA)
+
+    # Parse options
+    args = Options().parse()
+    #Train Image Model
+
+    preprocess_img_folder(args.img_path,args.img_all_data)
+    divide_into_sets_allclasses(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data)
+    train_encoder_network(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data,args.img_path,args.img_ext)
+
+
+    #Train Sketch Model
+
+    # divide_into_sets_allclasses(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data)
+    # train_encoder_network(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data,args.sketch_path,args.sketch_ext)
+
+def main_encoder():
+    #Preprocessing / creating train-test-valid from data
+    #Image
+    preprocess_img_folder(args.img_path,args.img_all_data)
+    divide_into_sets_allclasses(args.img_all_data,args.img_train_data,args.img_test_data,args.img_valid_data)
+    #Sketch
+    divide_into_sets_allclasses(args.sketch_all_data,args.sketch_train_data,args.sketch_test_data,args.sketch_valid_data)
+
+
+
+
 if __name__ == '__main__':
-    main()
+    main_classifier()
+    #main_encoder()

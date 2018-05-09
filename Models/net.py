@@ -31,14 +31,14 @@ class Net(nn.Module):
 
         #print(x.size(),attn_mask.size()) #Size here is [256,256,13,13]
         #print(attn_mask)
-
         x = x*attn_mask
         # print(x.size())
 
         x = x.sum(2).sum(2)
         # print(x.size()) #Size here is [256,256]
+        multimodal_input = x
 
         x = self.encoder(x)
         # print(x.size()) #Size here is [256,250]
 
-        return x,attn_mask
+        return x,multimodal_input,attn_mask

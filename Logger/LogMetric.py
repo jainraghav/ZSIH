@@ -10,10 +10,6 @@ import torch
 from tensorboardX import SummaryWriter
 import os
 
-__author__ = "Pau Riba"
-__email__ = "priba@cvc.uab.cat"
-
-
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
