@@ -5,15 +5,35 @@ Network models
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 from torch.autograd.variable import Variable
 
 class Net(nn.Module):
-    def __init__(self,new_alexnet,attention_model,encoder):
+    def __init__(self):
         super(Net, self).__init__()
         # Layers to follow here
-        self.alex = new_alexnet
-        self.attn = attention_model
-        self.encoder = encoder
+        self.attention_hl = 380
+        self.encoder_hl = 512
+        #AlexNet
+        original_model = models.alexnet(pretrained=True)
+        new_features = nn.Sequential(*list(original_model.features.children())[:-2])
+
+        original_model.features = new_features
+        new_model = original_model.features
+
+        #Attention model
+        attn_model = nn.Sequential(nn.Conv2d(256,self.attention_hl, kernel_size=1),
+                                   nn.Conv2d(self.attention_hl,1, kernel_size=1)
+                                   )
+        #Binary encoder
+        H = self.encoder_hl
+        binary_encoder = nn.Sequential(
+            nn.Linear(256, H),
+            nn.Linear(H, 250)
+        )
+        self.alex = new_model
+        self.attn = attn_model
+        self.encoder = binary_encoder
 
     def forward(self, x):
         # Functions on layers to follow here
