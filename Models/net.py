@@ -15,6 +15,7 @@ class Net(nn.Module):
         self.attention_hl = 380
         self.encoder_hl = 512
         #AlexNet
+        # original_model = models.vgg16(pretrained=True)
         original_model = models.alexnet(pretrained=True)
         new_features = nn.Sequential(*list(original_model.features.children())[:-2])
 
@@ -51,6 +52,7 @@ class Net(nn.Module):
 
         #print(x.size(),attn_mask.size()) #Size here is [256,256,13,13]
         #print(attn_mask)
+        # x = x*attn_mask
         x = x*attn_mask
         # print(x.size())
 

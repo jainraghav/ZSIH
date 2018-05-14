@@ -23,7 +23,7 @@ from options import Options
 from Datasets.load_sketchdataset import SketchDataset
 
 from preprocessing import divide_into_sets_allclasses
-from preprocessing import preprocess_img_folder
+from preprocessing import preprocess_folder
 from train_test import train,validate
 
 def log(test_loader,logger):
@@ -49,7 +49,7 @@ def tflog(attn,images,logger):
     logger.add_image('Attention_mask2', dn)
     logger.add_image('Image2', e)
 
-def train_encoder_network_as_classifier(ALL_DATA,IMG_PATH):
+def train_encoder_network_as_classifier(epochs,logdir,ALL_DATA,IMG_PATH):
 
     TRAIN_DATA,TEST_DATA,VALID_DATA = divide_into_sets_allclasses(ALL_DATA,IMG_PATH)
 
@@ -58,9 +58,9 @@ def train_encoder_network_as_classifier(ALL_DATA,IMG_PATH):
     dset_test = SketchDataset(TEST_DATA,IMG_PATH,transformations)
     dset_valid = SketchDataset(VALID_DATA,IMG_PATH,transformations)
 
-    train_loader = DataLoader(dset_train,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
-    test_loader = DataLoader(dset_test,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
-    valid_loader = DataLoader(dset_valid,batch_size=256,shuffle=True,num_workers=2,pin_memory=True)
+    train_loader = DataLoader(dset_train,batch_size=32,shuffle=True,num_workers=2,pin_memory=True)
+    test_loader = DataLoader(dset_test,batch_size=32,shuffle=True,num_workers=2,pin_memory=True)
+    valid_loader = DataLoader(dset_valid,batch_size=32,shuffle=True,num_workers=2,pin_memory=True)
 
     logging_loader = DataLoader(dset_train,batch_size=256,shuffle=False,num_workers=2,pin_memory=True)
 
@@ -69,8 +69,8 @@ def train_encoder_network_as_classifier(ALL_DATA,IMG_PATH):
 
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
 
-    num_epochs = 10
-    log_dir = 'Log/'
+    num_epochs = epochs
+    log_dir = logdir
     logger = LogMetric.Logger(log_dir, force=True)
     for epoch in range(1, num_epochs):
         train(model,optimizer,epoch,train_loader,logger)
@@ -95,11 +95,12 @@ def main_classifier():
     # Parse options
     args = Options().parse()
     #Train Image Model
-    preprocess_img_folder(args.img_path,args.img_all_data)
-    train_encoder_network_as_classifier(args.img_all_data,args.img_path)
+    # classes = preprocess_folder(args.img_path,args.img_all_data)
+    # train_encoder_network_as_classifier(args.img_all_data,args.img_path)
 
     #Train Sketch Model
-    # train_encoder_network_as_classifier(args.sketch_all_data,args.sketch_path)
+    classes = preprocess_folder(args.sketch_path,args.sketch_all_data)
+    train_encoder_network_as_classifier(args.epochs,args.logdir,args.sketch_all_data,args.sketch_path)
 
 if __name__ == '__main__':
     main_classifier()

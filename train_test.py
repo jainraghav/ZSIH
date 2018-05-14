@@ -21,6 +21,7 @@ def train(model,optimizer,epoch,train_loader,logger):
         target = target.type('torch.cuda.LongTensor')
         # print(data.size(),target.size())
         optimizer.zero_grad()
+        #import pdb; pdb.set_trace()
         output,multimodal_input,attn = model(data)
         # print(output)
         target = target.squeeze_()

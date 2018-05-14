@@ -20,6 +20,9 @@ class Options():
         parser.add_argument('--img_all_data', type=str, default="TU-Berlin-images/filelist.txt"  ,help='Path to txt file containing all image paths.')
         parser.add_argument('--img_temp_data', type=str, default="TU-Berlin-images/temp-filelist.txt"  ,help='Path to txt file containing few image paths for testing.')
 
+        parser.add_argument('--epochs', type=int, default=20 ,help='Training epochs.')
+        parser.add_argument('--logdir', type=str, default="Log/" ,help='Directory to log in exps for TensorBoard')
+
 
         self.parser = parser
 

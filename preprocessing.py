@@ -4,13 +4,15 @@ from PIL import Image
 import pandas as pd
 from numpy import array
 
-def preprocess_img_folder(IMG_PATH,ALL_DATA):
+def preprocess_folder(IMG_PATH,ALL_DATA):
 
+    classes = []
     all_image_classes = os.listdir(IMG_PATH)
     all_image_path_set = []
 
     for cl in all_image_classes:
         if os.path.isdir(IMG_PATH + cl + '/'):
+            classes.append(cl)
             class_files = os.listdir(IMG_PATH + cl + '/')
             refined_class_files = [cl+'/'+x for x in class_files]
             all_image_path_set = all_image_path_set + refined_class_files
@@ -19,6 +21,8 @@ def preprocess_img_folder(IMG_PATH,ALL_DATA):
         f1.write("ImagePath\n")
         for line in all_image_path_set:
             f1.write(line+"\n")
+
+    return classes
 
 #for zero-shot learning task
 def divide_into_sets_disjointclasses(ALL_DATA,IMG_PATH,trainp=0.6,validp=0.2,testp=0.2):

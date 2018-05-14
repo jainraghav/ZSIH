@@ -51,14 +51,14 @@ class SketchImageDataset(Dataset):
         labels = [x[0].split('/')[0] for x in refined_image_sketch_hash]
 
         values = array(labels)
-
+        # print(values)
         label_encoder = LabelEncoder()
         integer_encoded = label_encoder.fit_transform(values)
 
         onehot_encoder = OneHotEncoder(sparse=False)
         integer_encoded = integer_encoded.reshape(len(integer_encoded), 1)
-
-        self.y_train = integer_encoded
+        # print(integer_encoded)
+        self.y_train = values
 
     def __getitem__(self, index):
         sketch = Image.open(self.sketch_path + self.X_train[index][0])
@@ -70,7 +70,7 @@ class SketchImageDataset(Dataset):
             sketch = self.transform(sketch)
             image = self.transform(image)
 
-        label = torch.from_numpy(self.y_train[index])
+        label = self.y_train[index]
         return sketch, image, label
 
     def __len__(self):
