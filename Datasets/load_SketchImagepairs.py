@@ -19,6 +19,7 @@ from itertools import permutations
 class SketchImageDataset(Dataset):
     def __init__(self, sketch_data, image_data, sketch_path, image_path, transform=None):
 
+        print("Loading Data Set")
         sketch_df = pd.read_csv(sketch_data)
         image_df = pd.read_csv(image_data)
         self.sketch_path = sketch_path
@@ -35,7 +36,6 @@ class SketchImageDataset(Dataset):
         image_classes = [x.split('/')[0] for x in image_arr]
         uniq_classes = list(set(sketch_classes))
 
-        print(uniq_classes)
         image_sketch_hash = []
         for x in uniq_classes:
             indices_sketch = [i for i, e in enumerate(sketch_classes) if e == x]
@@ -52,13 +52,14 @@ class SketchImageDataset(Dataset):
 
         values = array(labels)
         # print(values)
-        label_encoder = LabelEncoder()
-        integer_encoded = label_encoder.fit_transform(values)
-
-        onehot_encoder = OneHotEncoder(sparse=False)
-        integer_encoded = integer_encoded.reshape(len(integer_encoded), 1)
+        # label_encoder = LabelEncoder()
+        # integer_encoded = label_encoder.fit_transform(values)
+        #
+        # onehot_encoder = OneHotEncoder(sparse=False)
+        # integer_encoded = integer_encoded.reshape(len(integer_encoded), 1)
         # print(integer_encoded)
         self.y_train = values
+        print("DataSet Loaded !")
 
     def __getitem__(self, index):
         sketch = Image.open(self.sketch_path + self.X_train[index][0])

@@ -15,40 +15,93 @@ import re
 import pdb
 import numpy as np
 from PIL import Image
+import csv
+import timeit
 import pandas as pd
 from numpy import array
-from subprocess import call
+import scipy.sparse as sp
+
+import gensim.downloader as api
 
 #Own modules
 from Logger import LogMetric
 from options import Options
 from Models import net
 from Datasets.load_SketchImagepairs import SketchImageDataset
-
 from preprocessing import divide_into_sets_disjointclasses
 from preprocessing import preprocess_folder
 
-def train(model_s,model_i,optimizer,epoch,train_loader,logger):
+class kproduct(nn.Module):
+    def __init__(self):
+        super(kproduct, self).__init__()
+        self.Wsk = nn.Linear(256,256)
+        self.Wim = nn.Linear(256,256)
+
+    def kprod(self,A,B):
+        prod = []
+        assert(len(A)==len(B))
+        A1 = A.view(-1,1).repeat(1,256).view(250,-1)
+        B1 = B.repeat(1,256).view(250,-1)
+        prod = A1*B1
+        # print(prod.size())
+        return prod
+
+    def forward(self, x, y):
+        x = self.Wsk(x)
+        y = self.Wim(y)
+        xy = self.kprod(x,y)
+        return F.relu(xy)
+
+class Word2Vec():
+    def __init__(self):
+        print("Loading Word2Vec Model")
+        info = api.info()
+        self.model = api.load("word2vec-google-news-300")
+        print("Model loaded !")
+
+    def vec(self,word):
+      return self.model.word_vec(word)
+
+    def find_closest(self,word):
+        return self.model.similar_by_word(word)
+
+    def distance(self,a,b):
+        return self.model.distance(a,b)
+
+def gnn(word2vec,batch_labels,input,hashlen):
+    batch_size = len(batch_labels)
+    adj = np.zeros((batch_size,batch_size))
+
+    for i in range(batch_size):
+        for j in range(batch_size):
+            adj[i][j] = word2vec.distance(batch_labels[i],batch_labels[j])
+
+    adj_d = torch.from_numpy(adj).cuda()
+    features = input.type(torch.cuda.DoubleTensor)
+
+    return adj_d,features
+
+
+def train(hashlen,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger):
     model_s.train()
     model_i.train()
+    concat.train()
+    graph_model.train()
     for batch_idx, (data_s, data_i, target) in enumerate(train_loader):
-        '''
-        Here target is a list of label strings to be converted to semantic embeddings
-        '''
         data_s, data_i, target = Variable(data_s).cuda(), Variable(data_i).cuda(), target
-        print(target)
-        # import pdb; pdb.set_trace()
+
         optimizer.zero_grad()
+
         hash_s, multimodal_s, attn_s = model_s(data_s)
         hash_i, multimodal_i, attn_i = model_i(data_i)
 
-        # input_s = multimodal_s.cpu().detach().numpy()
-        # input_i = multimodal_i.cpu().detach().numpy()
-        # combined_representation = np.kron(input_s,input_i)
-
+        combined = concat(multimodal_s,multimodal_i)
+        # here combined is of size([250,65536])
 
         print(batch_idx)
-        #gnn(multimodal1, multimodal2)
+
+        adj,features = gnn(word2vec_model,target,combined,hashlen)
+        output_hash = graph_model(features,adj)
 
         # print(output)
         # target = target.squeeze_()
@@ -82,7 +135,7 @@ def validate(model_s,model_i,valid_loader,logger):
     # acc = (correct/total)*100
     return acc
 
-def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data):
+def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data,hashlen):
 
     SKETCH_TRAIN_DATA, SKETCH_TEST_DATA, SKETCH_VALID_DATA = divide_into_sets_disjointclasses(sketch_data,sketch_path)
     IMG_TRAIN_DATA, IMG_TEST_DATA, IMG_VALID_DATA = divide_into_sets_disjointclasses(image_data,image_path)
@@ -95,19 +148,20 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     train_loader = DataLoader(dset_train,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
     test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
     valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
+    sketch_model = net.Net(hashlen).cuda()
+    image_model = net.Net(hashlen).cuda()
+    concat = kproduct().cuda()
+    word2vec_model = Word2Vec()
+    graph_model = net.GCN(nfeat=65536, nhid=1024, nclass=hashlen, dropout=0.2).cuda().double()
 
-    sketch_model = net.Net().cuda()
-    image_model = net.Net().cuda()
-
-    optimizer = optim.SGD(list(sketch_model.parameters()) + list(image_model.parameters()), lr=0.01, momentum=0.5)
+    optimizer = optim.SGD(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) , lr=0.01, momentum=0.5)
 
     num_epochs = epochs
     log_dir = logdir
     logger = LogMetric.Logger(log_dir, force=True)
 
     for epoch in range(1, num_epochs):
-        train(sketch_model,image_model,optimizer,epoch,train_loader,logger)
-
+        train(hashlen,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
         #validate(valid_loader)
         #log(logging_loader,logger)
     print("End of training !")
@@ -115,14 +169,9 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
 def main():
     args = Options().parse()
     classes = preprocess_folder(args.img_path,args.img_all_data)
-    #replacing special chars with spaces in labels
-    refined_classes = [re.sub(r'\W+', ' ', x) for x in classes]
-    #print(refined_classes)
+    classes =  preprocess_folder(args.sketch_path,args.sketch_all_data)
 
-
-
-    #return
-    sketch_image_encoder(args.epochs,args.logdir,args.sketch_path,args.img_path,args.sketch_all_data,args.img_all_data)
+    sketch_image_encoder(args.epochs,args.logdir,args.sketch_path,args.img_path,args.sketch_all_data,args.img_all_data,args.hashcode_length)
     #sketch_image_encoder(args.sketch_path,args.image_path,args.sketch_all_data,args.image_all_data)
 
 if __name__ == '__main__':
