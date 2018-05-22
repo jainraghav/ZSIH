@@ -11,6 +11,7 @@ from torch.autograd import Variable
 from torchvision import models
 
 import os
+import math
 import re
 import pdb
 import numpy as np
@@ -66,7 +67,17 @@ class Word2Vec():
         return self.model.similar_by_word(word)
 
     def distance(self,a,b):
-        return self.model.distance(a,b)
+        return math.exp(-1*self.model.distance(a,b)/0.1)
+
+class SemanticDecoder(nn.Module):
+    def __init__(self):
+        super(SemanticDecoder, self).__init__()
+        self.mu = nn.Linear(128,300)
+        self.sigma = nn.Linear(128,300)
+    def forward(self,b,labels):
+        mean = self.mu(b)
+        var = self.sigma(b)
+        return mean + var*labels
 
 def gnn(word2vec,batch_labels,input,hashlen):
     batch_size = len(batch_labels)
@@ -81,20 +92,35 @@ def gnn(word2vec,batch_labels,input,hashlen):
 
     return adj_d,features
 
+def stochastic_neurons(hash):
+    random = torch.rand(hash.shape[1]).double().cuda()
+    random_distribution = random.repeat(hash.shape[0],1)
 
-def train(hashlen,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger):
+    on = torch.ones(hash.shape[0],hash.shape[1]).double().cuda()
+    zr = torch.zeros(hash.shape[0],hash.shape[1]).double().cuda()
+    binarized_hash = torch.where(hash>=random_distribution,on,zr)
+
+    return binarized_hash,random
+
+def qb(binarized_hash,hash):
+    result = hash.pow(binarized_hash).mul((1-hash).pow(1-binarized_hash))
+    return torch.prod(result,1)
+
+def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger):
     model_s.train()
     model_i.train()
     concat.train()
     graph_model.train()
+    decoder.train()
     for batch_idx, (data_s, data_i, target) in enumerate(train_loader):
         data_s, data_i, target = Variable(data_s).cuda(), Variable(data_i).cuda(), target
 
         optimizer.zero_grad()
 
-        hash_s, multimodal_s, attn_s = model_s(data_s)
-        hash_i, multimodal_i, attn_i = model_i(data_i)
+        gy, multimodal_s, attn_s = model_s(data_s)
+        fx, multimodal_i, attn_i = model_i(data_i)
 
+        #import pdb; pdb.set_trace()
         combined = concat(multimodal_s,multimodal_i)
         # here combined is of size([250,65536])
 
@@ -102,12 +128,25 @@ def train(hashlen,graph_model,word2vec_model,model_s,model_i,concat,optimizer,ep
 
         adj,features = gnn(word2vec_model,target,combined,hashlen)
         output_hash = graph_model(features,adj)
+        binarized_hash,random_distribution = stochastic_neurons(output_hash)
 
-        # print(output)
-        # target = target.squeeze_()
-        # loss = F.cross_entropy(output, target)
-        # loss.backward()
-        # optimizer.step()
+        qbxy = qb(binarized_hash,output_hash) #To use in the learning rate
+
+        # Create w2v from target
+        semantics = []
+        for x in target:
+            semantics.append(word2vec_model.vec(x))
+        semantics = np.asarray(semantics)
+        semantics = torch.from_numpy(semantics).double().cuda()
+        # -------------------------------------------------------------------
+
+        import pdb; pdb.set_trace()
+        psb = decoder(output_hash,semantics) #To use in the learning rate
+
+        loss = lossfn(qbxy,psb,gy,fx)
+
+        loss.backward()
+        optimizer.step()
         # if batch_idx % 10 == 0:
         #     print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
         #         epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -153,15 +192,18 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     concat = kproduct().cuda()
     word2vec_model = Word2Vec()
     graph_model = net.GCN(nfeat=65536, nhid=1024, nclass=hashlen, dropout=0.2).cuda().double()
+    decoder = SemanticDecoder().cuda().double()
 
-    optimizer = optim.SGD(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) , lr=0.01, momentum=0.5)
+    optimizer = optim.Adam(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) + list(decoder.parameters()), lr=0.01)
+    # optimizer = optim.SGD(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) + list(decoder.parameters()), lr=0.01, momentum=0.5)
+
 
     num_epochs = epochs
     log_dir = logdir
     logger = LogMetric.Logger(log_dir, force=True)
 
     for epoch in range(1, num_epochs):
-        train(hashlen,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
+        train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
         #validate(valid_loader)
         #log(logging_loader,logger)
     print("End of training !")
@@ -172,7 +214,6 @@ def main():
     classes =  preprocess_folder(args.sketch_path,args.sketch_all_data)
 
     sketch_image_encoder(args.epochs,args.logdir,args.sketch_path,args.img_path,args.sketch_all_data,args.img_all_data,args.hashcode_length)
-    #sketch_image_encoder(args.sketch_path,args.image_path,args.sketch_all_data,args.image_all_data)
 
 if __name__ == '__main__':
     main()
