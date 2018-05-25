@@ -79,30 +79,28 @@ class SemanticDecoder(nn.Module):
         self.sigma = nn.Linear(hashlen,300)
         # self.std = torch.from_numpy(np.random.normal(0,1),size=300).cuda().double()
     def forward(self,b,labels):
-        #import pdb; pdb.set_trace()
         mean = self.mu(b)
-        var = self.sigma(b)*self.sigma(b)
-        diag_id = torch.eye(var.size(1)).cuda().double()
-        batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
+        logvar = self.sigma(b)
+        std = torch.exp(0.5*logvar)
+        noise = torch.randn_like(std)
+        #var = self.sigma(b)*self.sigma(b)
+        # diag_id = torch.eye(var.size(1)).cuda().double()
+        # batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
+        return noise.mul(std).add_(mean)
 
-        diff = labels - mean
-        inv = [t.diag().reciprocal().diag() for t in torch.functional.unbind(batch_var)]
-        final = torch.stack(inv)
+def cross_entropy(pred, soft_targets):
+    logsoftmax = nn.LogSoftmax(dim=1)
+    return torch.mean(torch.sum(soft_targets * logsoftmax(pred), 1))
 
-        
-
-        psb = distribution_p1
-        return psb
-
-def lossfn(psb,gy,fx,hash,bin_hash,hashlen):
-    import pdb; pdb.set_trace()
+def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     h1 = bin_hash.detach()
     mse = nn.MSELoss()
     imgloss = mse(fx,h1)
     sketchloss = mse(gy,h1)
     bce = nn.BCELoss()
     qloss = bce(hash,bin_hash)
-    res = (qloss+torch.sum(psb)) + 1/hashlen*(imgloss+sketchloss)
+    ploss = cross_entropy(psb,labels)
+    res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
     return res
 
 def gnn(word2vec,batch_labels,input,hashlen):
@@ -168,14 +166,13 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,opti
         # -------------------------------------------------------------------
 
         psb = decoder(output_hash,semantics)
-        loss = lossfn(psb,gy.double(),fx.double(),output_hash,binarized_hash,hashlen)
+        loss = lossfn(semantics,psb,gy.double(),fx.double(),output_hash,binarized_hash,hashlen)
 
         loss.backward()
         optimizer.step()
-        if batch_idx % 10 == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data_s), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
+        print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            epoch, batch_idx * len(data_s), len(train_loader.dataset),
+            100. * batch_idx / len(train_loader), loss.item()))
         # logger.add_scalar('loss_train', float(loss.item()))
         # logger.step()
 
@@ -190,30 +187,12 @@ def test(test_loader,sketchdir,imgdir):
         imageb_hash = (np.sign(gy)+1)/2
 
 
-def validate(model_s,model_i,valid_loader,logger):
-    model_s.eval()
-    model_i.eval()
-    correct=0
-    total=0
-    with torch.no_grad():
-        for data in valid_loader:
-            sketch, image, label = data
-            label = label.cuda()
-            hash1 ,multimodal_input1 ,attn = model(Variable(sketch).cuda())
-            hash2 ,multimodal_input2 ,attn = model(Variable(image).cuda())
-    #         _,predicted = torch.max(output,1)
-    #         for i in range(len(images)):
-    #             a,b = predicted[i].item(),labels[i].item()
-    #             total+=1
-    #             if a==b:
-    #                 correct+=1
-    # acc = (correct/total)*100
-    return acc
-
 def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data,hashlen):
 
     SKETCH_TRAIN_DATA, SKETCH_TEST_DATA, SKETCH_VALID_DATA = divide_into_sets_disjointclasses(sketch_data,sketch_path)
     IMG_TRAIN_DATA, IMG_TEST_DATA, IMG_VALID_DATA = divide_into_sets_disjointclasses(image_data,image_path)
+
+    word2vec_model = Word2Vec()
 
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchImageDataset(SKETCH_TRAIN_DATA, IMG_TRAIN_DATA, sketch_path, image_path, transformations)
@@ -226,7 +205,6 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     sketch_model = net.Net(hashlen).cuda()
     image_model = net.Net(hashlen).cuda()
     concat = kproduct().cuda()
-    word2vec_model = Word2Vec()
     graph_model = net.GCN(nfeat=65536, nhid=1024, nclass=hashlen, dropout=0.5).cuda().double()
     decoder = SemanticDecoder(hashlen).cuda().double()
 
