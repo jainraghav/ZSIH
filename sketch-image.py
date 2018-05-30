@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch.autograd import Variable
 from torchvision import models
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 import os
 import math
@@ -77,20 +78,16 @@ class SemanticDecoder(nn.Module):
         super(SemanticDecoder, self).__init__()
         self.mu = nn.Linear(hashlen,300)
         self.sigma = nn.Linear(hashlen,300)
-        # self.std = torch.from_numpy(np.random.normal(0,1),size=300).cuda().double()
     def forward(self,b,labels):
         mean = self.mu(b)
-        logvar = self.sigma(b)
-        std = torch.exp(0.5*logvar)
-        noise = torch.randn_like(std)
-        #var = self.sigma(b)*self.sigma(b)
-        # diag_id = torch.eye(var.size(1)).cuda().double()
-        # batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
-        return noise.mul(std).add_(mean)
-
-def cross_entropy(pred, soft_targets):
-    logsoftmax = nn.LogSoftmax(dim=1)
-    return torch.mean(torch.sum(soft_targets * logsoftmax(pred), 1))
+        var = self.sigma(b)*self.sigma(b)
+        diag_id = torch.eye(var.size(1)).cuda().double()
+        batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
+        # =======================================
+        m = MultivariateNormal(mean, batch_var)
+        logprob = -1*m.log_prob(labels)
+        #  --------------------------------------
+        return logprob
 
 def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     h1 = bin_hash.detach()
@@ -99,7 +96,8 @@ def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     sketchloss = mse(gy,h1)
     bce = nn.BCELoss()
     qloss = bce(hash,bin_hash)
-    ploss = cross_entropy(psb,labels)
+    ploss = psb.sum()
+
     res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
     return res
 
@@ -126,14 +124,14 @@ def stochastic_neurons(hash):
 
     return binarized_hash,random
 
-def save_checkpoint(state, checkpoint):
-    filepath = os.path.join(checkpoint, 'last.pth.tar')
+def save_checkpoint(state, checkpoint, epoch):
+    filepath = os.path.join(checkpoint, str(epoch)+'epoch.pth.tar')
     if not os.path.exists(checkpoint):
         print("Checkpoint Directory does not exist! Making directory {}".format(checkpoint))
         os.mkdir(checkpoint)
     torch.save(state, filepath)
 
-def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger,sketchdir,imgdir):
+def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger):
     model_s.train()
     model_i.train()
     concat.train()
@@ -148,9 +146,6 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,opti
         gy, multimodal_s, attn_s = model_s(data_s)
         fx, multimodal_i, attn_i = model_i(data_i)
 
-        save_checkpoint({'epoch': epoch + 1,'state_dict': model_s.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir)
-        save_checkpoint({'epoch': epoch + 1,'state_dict': model_i.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir)
-
         combined = concat(multimodal_s,multimodal_i)
         # here combined is of size([250,65536])
 
@@ -163,29 +158,26 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,opti
         for x in target:
             semantics.append(word2vec_model.vec(x))
         semantics = torch.from_numpy(np.asarray(semantics)).double().cuda()
-        # -------------------------------------------------------------------
 
         psb = decoder(output_hash,semantics)
         loss = lossfn(semantics,psb,gy.double(),fx.double(),output_hash,binarized_hash,hashlen)
 
         loss.backward()
         optimizer.step()
-        print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-            epoch, batch_idx * len(data_s), len(train_loader.dataset),
-            100. * batch_idx / len(train_loader), loss.item()))
-        # logger.add_scalar('loss_train', float(loss.item()))
-        # logger.step()
 
-def test(test_loader,sketchdir,imgdir):
-    model_s = torch.load(sketchdir)
-    model_i = torch.load(imgdir)
+        if batch_idx%10==0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * len(data_s), len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+        logger.add_scalar('loss_train', float(loss.item()))
+        logger.step()
 
+def test(test_loader,model_s,model_i):
     for batch_idx, (data_s, data_i, target) in enumerate(test_loader):
         gy,_,blah1 = model_s(data_s-0.5)
-        fx,_,blah2 = model_s(data_i-0.5)
+        fx,_,blah2 = model_i(data_i-0.5)
         sketchb_hash = (np.sign(gy)+1)/2
         imageb_hash = (np.sign(gy)+1)/2
-
 
 def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data,hashlen):
 
@@ -199,9 +191,9 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     dset_test = SketchImageDataset(SKETCH_TEST_DATA, IMG_TEST_DATA, sketch_path, image_path, transformations)
     dset_valid = SketchImageDataset(SKETCH_VALID_DATA, IMG_VALID_DATA, sketch_path, image_path, transformations)
 
-    train_loader = DataLoader(dset_train,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
-    test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
-    valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=2,pin_memory=True)
+    train_loader = DataLoader(dset_train,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
+    test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
+    valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
     sketch_model = net.Net(hashlen).cuda()
     image_model = net.Net(hashlen).cuda()
     concat = kproduct().cuda()
@@ -219,17 +211,16 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     logger = LogMetric.Logger(log_dir, force=True)
 
     for epoch in range(1, num_epochs):
-        train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger,sketchdir,imgdir)
-        #validate(valid_loader)
-        #log(logging_loader,logger)
-    test(test_loader,sketchdir,imgdir)
+        train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
+        save_checkpoint({'epoch': epoch,'state_dict': model_s.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
+        save_checkpoint({'epoch': epoch,'state_dict': model_i.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
+        #test(valid_loader,sketch_model,image_model)
     print("End of training !")
 
 def main():
     args = Options().parse()
     classes = preprocess_folder(args.img_path,args.img_all_data)
     classes =  preprocess_folder(args.sketch_path,args.sketch_all_data)
-
     sketch_image_encoder(args.epochs,args.logdir,args.sketch_path,args.img_path,args.sketch_all_data,args.img_all_data,args.hashcode_length)
 
 if __name__ == '__main__':

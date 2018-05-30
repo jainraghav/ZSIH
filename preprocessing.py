@@ -1,5 +1,6 @@
 import os
 import pdb
+import random
 from PIL import Image
 import pandas as pd
 from numpy import array
@@ -31,10 +32,13 @@ def divide_into_sets_disjointclasses(ALL_DATA,IMG_PATH,trainp=0.6,validp=0.2,tes
     arr = tmp_df['ImagePath'].str.partition('/')[0].values.tolist()
     all_classes = set(arr)
     all = list(all_classes)
-    train_set = all[:int(trainp*len(all))]
-    valid_set = all[int(trainp*len(all))+1:int(trainp*len(all))+1+int(validp*len(all))]
-    test_set = all[int(trainp*len(all))+1+int(validp*len(all)):]
-
+    #import pdb; pdb.set_trace()
+    # train_set = all[:int(trainp*len(all))]
+    # valid_set = all[int(trainp*len(all))+1:int(trainp*len(all))+1+int(validp*len(all))]
+    # test_set = all[int(trainp*len(all))+1+int(validp*len(all)):]
+    train_set = all[0:100]
+    valid_set = all[125:150]
+    test_set = all[100:125]
     TRAIN_DATA = IMG_PATH + "filelist-train.txt"
     with open(ALL_DATA) as f:
         with open(TRAIN_DATA, "w") as f1:
