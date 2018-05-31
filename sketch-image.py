@@ -22,16 +22,20 @@ import timeit
 import pandas as pd
 from numpy import array
 import scipy.sparse as sp
-
+import multiprocessing
+from joblib import Parallel, delayed
+from scipy.spatial.distance import cdist
+from sklearn.metrics import average_precision_score
 import gensim.downloader as api
 
 #Own modules
 from Logger import LogMetric
 from options import Options
 from Models import net
-from Datasets.load_SketchImagepairs import SketchImageDataset
+from Datasets.load_SketchImagepairs import SketchImageDataset,Datapoints
 from preprocessing import divide_into_sets_disjointclasses
 from preprocessing import preprocess_folder
+from test import testmap
 
 class kproduct(nn.Module):
     def __init__(self):
@@ -42,8 +46,8 @@ class kproduct(nn.Module):
     def kprod(self,A,B):
         prod = []
         assert(len(A)==len(B))
-        A1 = A.view(-1,1).repeat(1,256).view(250,-1)
-        B1 = B.repeat(1,256).view(250,-1)
+        A1 = A.view(-1,1).repeat(1,256).view(len(A),-1)
+        B1 = B.repeat(1,256).view(len(B),-1)
         prod = A1*B1
         # print(prod.size())
         return prod
@@ -165,35 +169,32 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,opti
         loss.backward()
         optimizer.step()
 
-        if batch_idx%10==0:
+        if batch_idx%4==0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data_s), len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         logger.add_scalar('loss_train', float(loss.item()))
         logger.step()
 
-def test(test_loader,model_s,model_i):
-    for batch_idx, (data_s, data_i, target) in enumerate(test_loader):
-        gy,_,blah1 = model_s(data_s-0.5)
-        fx,_,blah2 = model_i(data_i-0.5)
-        sketchb_hash = (np.sign(gy)+1)/2
-        imageb_hash = (np.sign(gy)+1)/2
-
 def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data,hashlen):
 
     SKETCH_TRAIN_DATA, SKETCH_TEST_DATA, SKETCH_VALID_DATA = divide_into_sets_disjointclasses(sketch_data,sketch_path)
     IMG_TRAIN_DATA, IMG_TEST_DATA, IMG_VALID_DATA = divide_into_sets_disjointclasses(image_data,image_path)
 
-    word2vec_model = Word2Vec()
-
     transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
     dset_train = SketchImageDataset(SKETCH_TRAIN_DATA, IMG_TRAIN_DATA, sketch_path, image_path, transformations)
-    dset_test = SketchImageDataset(SKETCH_TEST_DATA, IMG_TEST_DATA, sketch_path, image_path, transformations)
-    dset_valid = SketchImageDataset(SKETCH_VALID_DATA, IMG_VALID_DATA, sketch_path, image_path, transformations)
+    dset_test_s = Datapoints(SKETCH_TEST_DATA, sketch_path, transformations)
+    dset_test_i = Datapoints(IMG_TEST_DATA, image_path, transformations)
+    dset_valid_s = Datapoints(SKETCH_VALID_DATA, sketch_path, transformations)
+    dset_valid_i = Datapoints(IMG_VALID_DATA, image_path, transformations)
+
+    word2vec_model = Word2Vec()
 
     train_loader = DataLoader(dset_train,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
-    test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
-    valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
+    test_sketch_loader = DataLoader(dset_test_s,batch_size=64,shuffle=True,num_workers=4,pin_memory=True)
+    test_image_loader = DataLoader(dset_test_i,batch_size=512,shuffle=True,num_workers=4,pin_memory=True)
+    # test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
+    # valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
     sketch_model = net.Net(hashlen).cuda()
     image_model = net.Net(hashlen).cuda()
     concat = kproduct().cuda()
@@ -212,9 +213,9 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
 
     for epoch in range(1, num_epochs):
         train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
-        save_checkpoint({'epoch': epoch,'state_dict': model_s.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
-        save_checkpoint({'epoch': epoch,'state_dict': model_i.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
-        #test(valid_loader,sketch_model,image_model)
+        #save_checkpoint({'epoch': epoch,'state_dict': sketch_model.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
+        #save_checkpoint({'epoch': epoch,'state_dict': image_model.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
+        testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)
     print("End of training !")
 
 def main():

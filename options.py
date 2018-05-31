@@ -23,7 +23,7 @@ class Options():
         parser.add_argument('--epochs', type=int, default=5 ,help='Training epochs.')
         parser.add_argument('--logdir', type=str, default="Log/" ,help='Directory to log in exps for TensorBoard')
 
-        parser.add_argument('--hashcode_length', type=int, default=128 ,help='Length of the final output hash code')
+        parser.add_argument('--hashcode_length', type=int, default=64 ,help='Length of the final output hash code')
 
 
         self.parser = parser
