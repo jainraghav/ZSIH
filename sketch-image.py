@@ -80,27 +80,35 @@ class Word2Vec():
 class SemanticDecoder(nn.Module):
     def __init__(self,hashlen):
         super(SemanticDecoder, self).__init__()
-        self.mu = nn.Linear(hashlen,300)
-        self.sigma = nn.Linear(hashlen,300)
+        self.mu = nn.Linear(180,300)
+        self.sigma = nn.Linear(180,300)
+        self.hidden = nn.Linear(hashlen,180)
     def forward(self,b,labels):
-        mean = self.mu(b)
-        var = self.sigma(b)*self.sigma(b)
+        h = self.hidden(b)
+        mean = self.mu(h)
+        # var = torch.exp(0.5*self.sigma(b))
+        # eps = torch.randn_like(var)
+        import pdb; pdb.set_trace()
+        var = self.sigma(h)*self.sigma(h)
         diag_id = torch.eye(var.size(1)).cuda().double()
         batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
         # =======================================
         m = MultivariateNormal(mean, batch_var)
         logprob = -1*m.log_prob(labels)
         #  --------------------------------------
+        # return eps.mul(var).add_(mean)
         return logprob
 
 def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     h1 = bin_hash.detach()
+    h2 = hash.detach()
     mse = nn.MSELoss()
-    imgloss = mse(fx,h1)
-    sketchloss = mse(gy,h1)
+    imgloss = mse(fx,h2)
+    sketchloss = mse(gy,h2)
     bce = nn.BCELoss()
     qloss = bce(hash,bin_hash)
-    ploss = psb.sum()
+    import pdb; pdb.set_trace()
+    ploss = torch.div(psb.sum(),250)
 
     res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
     return res
@@ -191,7 +199,7 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     word2vec_model = Word2Vec()
 
     train_loader = DataLoader(dset_train,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
-    test_sketch_loader = DataLoader(dset_test_s,batch_size=64,shuffle=True,num_workers=4,pin_memory=True)
+    test_sketch_loader = DataLoader(dset_test_s,batch_size=512,shuffle=True,num_workers=4,pin_memory=True)
     test_image_loader = DataLoader(dset_test_i,batch_size=512,shuffle=True,num_workers=4,pin_memory=True)
     # test_loader = DataLoader(dset_test,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
     # valid_loader = DataLoader(dset_valid,batch_size=250,shuffle=True,num_workers=4,pin_memory=True)
@@ -213,8 +221,8 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
 
     for epoch in range(1, num_epochs):
         train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
-        #save_checkpoint({'epoch': epoch,'state_dict': sketch_model.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
-        #save_checkpoint({'epoch': epoch,'state_dict': image_model.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
+        save_checkpoint({'epoch': epoch,'state_dict': sketch_model.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
+        save_checkpoint({'epoch': epoch,'state_dict': image_model.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
         testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)
     print("End of training !")
 
