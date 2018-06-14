@@ -17,6 +17,7 @@ from sklearn.metrics import average_precision_score
 
 import pdb
 import numpy as np
+np.seterr(divide='ignore', invalid='ignore')
 from numpy import array
 
 from Models import net
@@ -26,26 +27,30 @@ from Datasets.load_SketchImagepairs import SketchImageDataset,Datapoints
 def testmap(test_img_loader,test_sketch_loader,model_s,model_i):
     all_image_hashes = []
     img_labels=[]
-    for batch_idx,(data_i,label) in enumerate(test_img_loader):
+    for batch_idx,(data_i,label,_) in enumerate(test_img_loader):
         data_i = data_i.cuda()
         fx,_,blah = model_i(data_i-0.5)
         fxd = fx.cpu().detach().numpy()
         imageb_hash = (np.sign(fxd)+1)/2
+        # imageb_hash = fxd
         # import pdb; pdb.set_trace()
         all_image_hashes.extend(imageb_hash)
         img_labels.extend(label)
 
     all_sketch_hashes = []
     sketch_labels=[]
-    for batch_idx, (data_s, target) in enumerate(test_sketch_loader):
+    for batch_idx, (data_s, target,_) in enumerate(test_sketch_loader):
         data_s = data_s.cuda()
         gy,_,blah1 = model_s(data_s-0.5)
         gyd = gy.cpu().detach().numpy()
         sketchb_hash = (np.sign(gyd)+1)/2
+        #sketchb_hash = gyd
         all_sketch_hashes.extend(sketchb_hash)
         sketch_labels.extend(target)
-
+    # import pdb; pdb.set_trace()
+    #hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'euclidean')
     hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'hamming')
+
 
     str_sim = (np.expand_dims(sketch_labels, axis=1) == np.expand_dims(img_labels, axis=0)) * 1
     nq = str_sim.shape[0]
@@ -67,10 +72,10 @@ if __name__ == '__main__':
     sketch_model = net.Net(args.hashcode_length).cuda()
     image_model = net.Net(args.hashcode_length).cuda()
 
-    checkpoint_s = torch.load("saved_models/sketch/1epoch.pth.tar")
-    checkpoint_i = torch.load("saved_models/image/1epoch.pth.tar")
+    checkpoint_s = torch.load(args.sketch_model+"1epoch.pth.tar")
+    checkpoint_i = torch.load(args.image_model+"1epoch.pth.tar")
 
     sketch_model.load_state_dict(checkpoint_s['state_dict'])
     image_model.load_state_dict(checkpoint_i['state_dict'])
 
-    test(test_image_loader,test_sketch_loader,sketch_model,image_model)
+    testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)

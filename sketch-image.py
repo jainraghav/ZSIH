@@ -86,9 +86,7 @@ class SemanticDecoder(nn.Module):
     def forward(self,b,labels):
         h = self.hidden(b)
         mean = self.mu(h)
-        # var = torch.exp(0.5*self.sigma(b))
-        # eps = torch.randn_like(var)
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         var = self.sigma(h)*self.sigma(h)
         diag_id = torch.eye(var.size(1)).cuda().double()
         batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
@@ -96,8 +94,8 @@ class SemanticDecoder(nn.Module):
         m = MultivariateNormal(mean, batch_var)
         logprob = -1*m.log_prob(labels)
         #  --------------------------------------
-        # return eps.mul(var).add_(mean)
         return logprob
+        # return m.rsample()
 
 def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     h1 = bin_hash.detach()
@@ -107,11 +105,19 @@ def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     sketchloss = mse(gy,h2)
     bce = nn.BCELoss()
     qloss = bce(hash,bin_hash)
-    import pdb; pdb.set_trace()
     ploss = torch.div(psb.sum(),250)
 
     res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
+    # res = (qloss) + 1/(2*hashlen)*(imgloss+sketchloss)
     return res
+
+def normalize(mx):
+    rowsum = np.array(mx.sum(1))
+    r_inv = np.power(rowsum, -1).flatten()
+    r_inv[np.isinf(r_inv)] = 0.
+    r_mat_inv = sp.diags(r_inv)
+    mx = r_mat_inv.dot(mx)
+    return mx
 
 def gnn(word2vec,batch_labels,input,hashlen):
     batch_size = len(batch_labels)
@@ -121,8 +127,12 @@ def gnn(word2vec,batch_labels,input,hashlen):
         for j in range(batch_size):
             adj[i][j] = word2vec.distance(batch_labels[i],batch_labels[j])
 
+    adj = normalize(adj)
     adj_d = torch.from_numpy(adj).cuda()
-    features = input.type(torch.cuda.DoubleTensor)
+    #import pdb; pdb.set_trace()
+    input_n = normalize(input.cpu().detach().numpy())
+    input_n = torch.from_numpy(input_n)
+    features = input_n.type(torch.cuda.DoubleTensor)
 
     return adj_d,features
 
@@ -223,7 +233,7 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
         train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
         save_checkpoint({'epoch': epoch,'state_dict': sketch_model.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
         save_checkpoint({'epoch': epoch,'state_dict': image_model.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
-        testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)
+        #testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)
     print("End of training !")
 
 def main():
