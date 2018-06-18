@@ -29,10 +29,11 @@ def testmap(test_img_loader,test_sketch_loader,model_s,model_i):
     img_labels=[]
     for batch_idx,(data_i,label,_) in enumerate(test_img_loader):
         data_i = data_i.cuda()
-        fx,_,blah = model_i(data_i-0.5)
+        # fx,_,blah = model_i(data_i-0.5)
+        fx,_,blah = model_i(data_i)
         fxd = fx.cpu().detach().numpy()
-        imageb_hash = (np.sign(fxd)+1)/2
-        # imageb_hash = fxd
+        # imageb_hash = (np.sign(fxd)+1)/2
+        imageb_hash = fxd
         # import pdb; pdb.set_trace()
         all_image_hashes.extend(imageb_hash)
         img_labels.extend(label)
@@ -41,18 +42,20 @@ def testmap(test_img_loader,test_sketch_loader,model_s,model_i):
     sketch_labels=[]
     for batch_idx, (data_s, target,_) in enumerate(test_sketch_loader):
         data_s = data_s.cuda()
-        gy,_,blah1 = model_s(data_s-0.5)
+        # gy,_,blah1 = model_s(data_s-0.5)
+        gy,_,blah1 = model_s(data_s)
         gyd = gy.cpu().detach().numpy()
-        sketchb_hash = (np.sign(gyd)+1)/2
-        #sketchb_hash = gyd
+        # sketchb_hash = (np.sign(gyd)+1)/2
+        sketchb_hash = gyd
         all_sketch_hashes.extend(sketchb_hash)
         sketch_labels.extend(target)
     # import pdb; pdb.set_trace()
-    #hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'euclidean')
-    hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'hamming')
+    hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'euclidean')
+    # hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'hamming')
 
 
     str_sim = (np.expand_dims(sketch_labels, axis=1) == np.expand_dims(img_labels, axis=0)) * 1
+    #import pdb; pdb.set_trace()
     nq = str_sim.shape[0]
     num_cores = min(multiprocessing.cpu_count(), 32)
     aps = Parallel(n_jobs=num_cores)(delayed(average_precision_score)(str_sim[iq], hamm_d[iq]) for iq in range(nq))
@@ -72,8 +75,9 @@ if __name__ == '__main__':
     sketch_model = net.Net(args.hashcode_length).cuda()
     image_model = net.Net(args.hashcode_length).cuda()
 
-    checkpoint_s = torch.load(args.sketch_model+"1epoch.pth.tar")
-    checkpoint_i = torch.load(args.image_model+"1epoch.pth.tar")
+    #change the checkpoint you want to load here...
+    checkpoint_s = torch.load(args.sketch_model+"15epoch.pth.tar")
+    checkpoint_i = torch.load(args.image_model+"15epoch.pth.tar")
 
     sketch_model.load_state_dict(checkpoint_s['state_dict'])
     image_model.load_state_dict(checkpoint_i['state_dict'])

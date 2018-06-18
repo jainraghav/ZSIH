@@ -92,10 +92,10 @@ class SemanticDecoder(nn.Module):
         batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
         # =======================================
         m = MultivariateNormal(mean, batch_var)
-        logprob = -1*m.log_prob(labels)
+        # logprob = -1*m.log_prob(labels)
         #  --------------------------------------
-        return logprob
-        # return m.rsample()
+        # return logprob
+        return m.rsample()
 
 def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     h1 = bin_hash.detach()
@@ -105,10 +105,11 @@ def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
     sketchloss = mse(gy,h2)
     bce = nn.BCELoss()
     qloss = bce(hash,bin_hash)
-    ploss = torch.div(psb.sum(),250)
+    #import pdb; pdb.set_trace()
+    ploss = mse(psb,labels)
 
     res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
-    # res = (qloss) + 1/(2*hashlen)*(imgloss+sketchloss)
+    #res = (qloss) + 1/(2*hashlen)*(imgloss+sketchloss)
     return res
 
 def normalize(mx):
@@ -152,6 +153,16 @@ def save_checkpoint(state, checkpoint, epoch):
         print("Checkpoint Directory does not exist! Making directory {}".format(checkpoint))
         os.mkdir(checkpoint)
     torch.save(state, filepath)
+
+def decay_lr(optimizer, epoch, init_lr=0.01, lr_decay_epoch=10):
+    lr = init_lr * (0.1**(epoch // lr_decay_epoch))
+
+    if epoch % lr_decay_epoch == 0:
+        print('LR is set to {}'.format(lr))
+
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return optimizer
 
 def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,concat,optimizer,epoch,train_loader,logger):
     model_s.train()
@@ -231,6 +242,7 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
 
     for epoch in range(1, num_epochs):
         train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,concat,optimizer,epoch,train_loader,logger)
+        #optimizer = decay_lr(optimizer,epoch)
         save_checkpoint({'epoch': epoch,'state_dict': sketch_model.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
         save_checkpoint({'epoch': epoch,'state_dict': image_model.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
         #testmap(test_image_loader,test_sketch_loader,sketch_model,image_model)
