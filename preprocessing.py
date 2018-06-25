@@ -78,9 +78,9 @@ def divide_into_sets_allclasses(ALL_DATA,IMG_PATH,trainp=0.6,validp=0.2,testp=0.
         for im in arr:
             if im.split('/')[0]==x:
                 temp_one_class.append(im)
-        train_set = train_set + temp_one_class[:int(trainp*len(temp_one_class))]
-        valid_set = valid_set + temp_one_class[int(trainp*len(temp_one_class)) : int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class))]
-        test_set = test_set + temp_one_class[int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class)) : ]
+    train_set = train_set + temp_one_class[:int(trainp*len(temp_one_class))]
+    valid_set = valid_set + temp_one_class[int(trainp*len(temp_one_class)) : int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class))]
+    test_set = test_set + temp_one_class[int(trainp*len(temp_one_class)) + int(validp*len(temp_one_class)) : ]
 
     #print(classes)
     TRAIN_DATA = IMG_PATH + "filelist-train.txt"

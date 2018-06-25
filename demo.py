@@ -10,6 +10,7 @@ from scipy.spatial.distance import cdist
 
 import numpy as np
 import pandas as pd
+import os
 from os import listdir
 from options import Options
 from Models import net
@@ -40,7 +41,7 @@ def prep(path):
     filepath = path + "filelist-test.txt"
     all_imgs = listdir(path)
     for x in all_imgs[:]:
-        if not(x.endswith(".jpeg") or x.endswith(".JPEG") or x.endswith(".png") or x.endswith(".PNG")):
+        if not(x.lower().endswith(".jpeg") or x.lower().endswith(".png") or x.lower().endswith(".jpg")):
             all_imgs.remove(x)
     with open(filepath, "w") as f:
         f.write("ImagePath\n")
@@ -70,6 +71,16 @@ def exec_it(smod,imod,input,ret_pool):
 
 def getFileName(image):
     print(image)
+    img = Image.open(image).resize((300,300))
+    img.show()
+
+class Splash(Toplevel):
+    def __init__(self, parent):
+        Toplevel.__init__(self, parent)
+        self.title("Splash")
+        frame2 = PhotoImage(file="load.gif", format="gif -index 2")
+        #frame2.pack()
+        self.update()
 
 class main:
     def __init__(self,master,args):
@@ -84,7 +95,6 @@ class main:
         self.c.bind('<ButtonRelease-1>',self.reset)
         self.sketch_model = args.sketch_model
         self.image_model = args.image_model
-        self.img_path = args.img_path
         self.hashcode_length = args.hashcode_length
 
     def changeW(self,e):
@@ -110,16 +120,24 @@ class main:
         y1 = y + self.c.winfo_height()
         ImageGrab.grab(bbox=(x,y,x1,y1)).save("demo_sketch/a.png")
 
+        # For windows
+        # PIL.ImageGrab.grab().crop((x,y,x1,y1)).save('a.png')
+
         folder_selected = filedialog.askdirectory()
         folder_selected+="/"
         filepath = prep(folder_selected)
 
-        checkpoint_s = torch.load(self.sketch_model+"10epoch.pth.tar")
-        checkpoint_i = torch.load(self.image_model+"10epoch.pth.tar")
-        transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
+        print("Retrieving results from "+filepath)
 
+        # splash = Splash(self.master)
+
+        #change model paths here wrt the code location
+        checkpoint_s = torch.load(self.sketch_model+"1epoch.pth.tar")
+        checkpoint_i = torch.load(self.image_model+"1epoch.pth.tar")
+
+        transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
         dset_test_i = Testdata(filepath, folder_selected, transformations)
-        test_image_loader = DataLoader(dset_test_i,batch_size=max(len(dset_test_i),512),shuffle=True,num_workers=4,pin_memory=True)
+        test_image_loader = DataLoader(dset_test_i,batch_size=min(len(dset_test_i),512),shuffle=True,num_workers=4,pin_memory=True)
 
         sketch_model = net.Net(self.hashcode_length).cuda()
         image_model = net.Net(self.hashcode_length).cuda()
@@ -127,12 +145,26 @@ class main:
         input_sketch = transformations(test_sketch)
         sketch_model.load_state_dict(checkpoint_s['state_dict'])
         image_model.load_state_dict(checkpoint_i['state_dict'])
-        print('here')
+        print('Models Loaded...')
 
         top10 = exec_it(sketch_model,image_model,input_sketch,test_image_loader)
         final = []
+
+        print("Retrieval Results:")
         print(top10)
         final.extend(top10.tolist())
+
+        # splash.destroy()
+
+        for i in range(len(final)):
+            im = Image.open(final[i])
+            im = im.resize((150,150))
+            tkimage = ImageTk.PhotoImage(im)
+            handler = lambda img = final[i]: getFileName(img)
+            imageButton = Button(self.output, image=tkimage, command=handler)
+            imageButton.grid(row=i//5,column=i%5)
+            imageButton.image=tkimage
+        self.output.pack()
 
 
     def clear(self):
@@ -146,16 +178,9 @@ class main:
         self.c['bg']=self.color_bg
 
     def res(self):
-        global final
-        for i in range(len(final)):
-            im = Image.open(final[i])
-            im = im.resize((150,150))
-            tkimage = ImageTk.PhotoImage(im)
-            handler = lambda img = final[i]: getFileName(img)
-            imageButton = Button(self.output, image=tkimage, command=handler)
-            imageButton.grid(row=i//5,column=i%5)
-            imageButton.image=tkimage
-        self.output.pack()
+        self.output.pack_forget()
+        self.c.delete(ALL)
+        self.c['bg']='white'
 
     def drawWidgets(self):
         global final
@@ -166,7 +191,7 @@ class main:
         self.slider.grid(row=0,column=1,ipadx=30)
         self.controls.pack()
 
-        self.c = Canvas(self.master,width=750,height=500,bg=self.color_bg,)
+        self.c = Canvas(self.master,width=750,height=600,bg=self.color_bg,)
         self.c.pack(fill=BOTH,expand=True)
 
         self.output = Frame(self.master,padx=5,pady=5)
@@ -176,9 +201,6 @@ class main:
         filemenu = Menu(menu)
         menu.add_cascade(label='File',menu=filemenu)
         filemenu.add_command(label='Export and Run',command=self.save_exec)
-        opmenu = Menu(menu)
-        menu.add_cascade(label='Show Results',menu=opmenu)
-        opmenu.add_command(label='Results',command=self.res)
         colormenu = Menu(menu)
         menu.add_cascade(label='Colors',menu=colormenu)
         colormenu.add_command(label='Brush Color',command=self.change_fg)
@@ -187,7 +209,9 @@ class main:
         menu.add_cascade(label='Options',menu=optionmenu)
         optionmenu.add_command(label='Clear Canvas',command=self.clear)
         optionmenu.add_command(label='Exit',command=self.master.destroy)
-
+        reset = Menu(menu)
+        menu.add_cascade(label='Reset',menu=reset)
+        reset.add_command(label='Reset',command=self.res)
 
 if __name__ == '__main__':
     args = Options().parse()
