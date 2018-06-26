@@ -11,6 +11,7 @@ from scipy.spatial.distance import cdist
 import numpy as np
 import pandas as pd
 import os
+import time
 from os import listdir
 from options import Options
 from Models import net
@@ -49,12 +50,13 @@ def prep(path):
             f.write(line+"\n")
     return filepath
 
-def exec_it(smod,imod,input,ret_pool):
+def exec_it(smod,imod,input,ret_pool,f,g):
     all_image_hashes = []
     img_paths=[]
     for batch_idx,(data_i,path) in enumerate(ret_pool):
         data_i = data_i.cuda()
-        fx,_,blah = imod(data_i-0.5)
+        rel_i,mask_i = imod(data_i)
+        fx = f(rel_i-0.5)
         fxd = fx.cpu().detach().numpy()
         imageb_hash = (np.sign(fxd)+1)/2
         # imageb_hash = fxd
@@ -62,7 +64,7 @@ def exec_it(smod,imod,input,ret_pool):
         img_paths.extend(path)
 
     img_paths = np.array(img_paths)
-    sketch_hash = (np.sign(smod(input.unsqueeze(0).cuda()-0.5)[0].cpu().detach().numpy())+1)/2
+    sketch_hash = (np.sign(g(smod(input.unsqueeze(0).cuda())[0]-0.5).cpu().detach().numpy())+1)/2
     hamm_d = cdist(sketch_hash, all_image_hashes, 'hamming')
     top10 = hamm_d[0].argsort()[:10]
     retrieved_imgs = img_paths[top10]
@@ -90,12 +92,12 @@ class main:
         self.old_x = None
         self.old_y = None
         self.penwidth = 5
-        self.drawWidgets()
-        self.c.bind('<B1-Motion>',self.paint)
-        self.c.bind('<ButtonRelease-1>',self.reset)
         self.sketch_model = args.sketch_model
         self.image_model = args.image_model
         self.hashcode_length = args.hashcode_length
+        self.drawWidgets()
+        self.c.bind('<B1-Motion>',self.paint)
+        self.c.bind('<ButtonRelease-1>',self.reset)
 
     def changeW(self,e):
         self.penwidth = e
@@ -111,7 +113,7 @@ class main:
         self.old_y = None
 
     def save_exec(self):
-
+        t0 = time.time()
         self.output.pack_forget()
         global final
         x = self.master.winfo_rootx() + self.c.winfo_x()
@@ -123,31 +125,15 @@ class main:
         # For windows
         # PIL.ImageGrab.grab().crop((x,y,x1,y1)).save('a.png')
 
-        folder_selected = filedialog.askdirectory()
-        folder_selected+="/"
-        filepath = prep(folder_selected)
-
-        print("Retrieving results from "+filepath)
-
         # splash = Splash(self.master)
-
-        #change model paths here wrt the code location
-        checkpoint_s = torch.load(self.sketch_model+"1epoch.pth.tar")
-        checkpoint_i = torch.load(self.image_model+"1epoch.pth.tar")
-
         transformations = transforms.Compose([transforms.Resize(224),transforms.ToTensor()])
-        dset_test_i = Testdata(filepath, folder_selected, transformations)
-        test_image_loader = DataLoader(dset_test_i,batch_size=min(len(dset_test_i),512),shuffle=True,num_workers=4,pin_memory=True)
+        dset_test_i = Testdata(self.filepath, self.folder_selected, transformations)
+        test_image_loader = DataLoader(dset_test_i,batch_size=min(len(dset_test_i),512),shuffle=True,num_workers=32,pin_memory=True)
 
-        sketch_model = net.Net(self.hashcode_length).cuda()
-        image_model = net.Net(self.hashcode_length).cuda()
         test_sketch = Image.open("demo_sketch/a.png").convert('RGB')
         input_sketch = transformations(test_sketch)
-        sketch_model.load_state_dict(checkpoint_s['state_dict'])
-        image_model.load_state_dict(checkpoint_i['state_dict'])
-        print('Models Loaded...')
 
-        top10 = exec_it(sketch_model,image_model,input_sketch,test_image_loader)
+        top10 = exec_it(self.sketch,self.image,input_sketch,test_image_loader,self.f,self.g)
         final = []
 
         print("Retrieval Results:")
@@ -166,6 +152,7 @@ class main:
             imageButton.image=tkimage
         self.output.pack()
 
+        print(time.time()-t0)
 
     def clear(self):
         self.c.delete(ALL)
@@ -190,6 +177,24 @@ class main:
         self.slider.set(self.penwidth)
         self.slider.grid(row=0,column=1,ipadx=30)
         self.controls.pack()
+
+        #Load Models
+        self.sketch = net.Net().cuda()
+        self.image = net.Net().cuda()
+        self.g = net.Encoder(args.hashcode_length).cuda()
+        self.f = net.Encoder(args.hashcode_length).cuda()
+        checkpoint_s = torch.load(self.sketch_model+"30epoch.pth.tar")
+        checkpoint_i = torch.load(self.image_model+"30epoch.pth.tar")
+        self.sketch.load_state_dict(checkpoint_s['state_dict_1'])
+        self.image.load_state_dict(checkpoint_i['state_dict_1'])
+        self.f.load_state_dict(checkpoint_i['stat_dict_2'])
+        self.g.load_state_dict(checkpoint_s['stat_dict_2'])
+        print('Models Loaded...')
+
+        #Load a particular directory
+        self.folder_selected = "/home/rjain/Desktop/exps/Sketchy-images/"
+        self.filepath = "/home/rjain/Desktop/exps/Sketchy-images/filelist-test.txt"
+        print("Retrieving results from "+ self.filepath)
 
         self.c = Canvas(self.master,width=750,height=600,bg=self.color_bg,)
         self.c.pack(fill=BOTH,expand=True)
