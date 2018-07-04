@@ -20,7 +20,7 @@ class Options():
         parser.add_argument('--img_all_data', type=str, default="Sketchy-images/filelist.txt"  ,help='Path to txt file containing all image paths.')
         parser.add_argument('--img_temp_data', type=str, default="Sketchy-images/temp-filelist.txt"  ,help='Path to txt file containing few image paths for testing.')
 
-        parser.add_argument('--epochs', type=int, default=50 ,help='Training epochs.')
+        parser.add_argument('--epochs', type=int, default=100 ,help='Training epochs.')
         parser.add_argument('--logdir', type=str, default="Log/" ,help='Directory to log in exps for TensorBoard')
 
         parser.add_argument('--hashcode_length', type=int, default=64 ,help='Length of the final output hash code')

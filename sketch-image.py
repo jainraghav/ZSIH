@@ -15,7 +15,6 @@ import os
 import time
 import math
 import re
-import pdb
 import numpy as np
 from PIL import Image
 import csv
@@ -81,47 +80,40 @@ class Word2Vec():
 class SemanticDecoder(nn.Module):
     def __init__(self,hashlen):
         super(SemanticDecoder, self).__init__()
-        self.mu = nn.Linear(180,300)
-        self.sigma = nn.Linear(180,300)
-        self.hidden = nn.Linear(hashlen,180)
+        self.mu = nn.Linear(hashlen,300)
+        self.sigma = nn.Linear(hashlen,300)
     def forward(self,b,labels):
-        h = self.hidden(b)
-        mean = self.mu(h)
-        # import pdb; pdb.set_trace()
-        var = self.sigma(h)*self.sigma(h)
+        mean = self.mu(b)
+        var = self.sigma(b)*self.sigma(b)
         diag_id = torch.eye(var.size(1)).cuda().double()
         batch_var = diag_id*var.unsqueeze(2).expand(*var.size(),var.size(1))
-        # =======================================
         m = MultivariateNormal(mean, batch_var)
-        # logprob = -1*m.log_prob(labels)
-        #  --------------------------------------
-        # return logprob
-        return m.rsample()
 
-def mse_loss(input, target):
-    return torch.mean(torch.sum((input-target)**2,1)/input.size(1))
+        # should encorporate labels here somehow
 
-def cross_entropy(pred,target,a):
-    logsoftmax = nn.LogSoftmax(dim=a)
-    return torch.mean(torch.sum(-target * logsoftmax(pred), 1))
+        # rep = labels.mul(var).add_(mean)
+        return m.rsample(),mean,var
+        # return rep
 
-def bce_loss(a,y,dim):
-    logsoftmax = nn.LogSoftmax(dim=dim)
-    return -(y*logsoftmax(a) + (1-y)*logsoftmax(1-a)).sum().mean()
+def cross_entropy(pred, soft_targets):
+    logsoftmax = nn.LogSoftmax()
+    return torch.mean(torch.sum(- soft_targets * logsoftmax(pred), 1))
 
-def lossfn(labels,psb,gy,fx,hash,bin_hash,hashlen):
-    #Batch-losses
-    imgloss = mse_loss(fx,hash)
-    sketchloss = mse_loss(gy,hash)
-    # import pdb; pdb.set_trace()
-    bce = nn.BCELoss()
-    qloss = bce(hash,bin_hash)
-    ploss = mse_loss(psb,labels)
-    #ploss = cross_entropy(psb,labels,0)
+def lossfn(labels,psb,mean,var,gy,fx,hash,bin_hash,hashlen):
+    import pdb; pdb.set_trace()
+    imgloss = F.mse_loss(fx,bin_hash.detach())
+    sketchloss = F.mse_loss(gy,bin_hash.detach())
 
-    # res = (qloss+ploss) + (imgloss+sketchloss)
-    res = (qloss+ploss) + 1/(2*hashlen)*(imgloss+sketchloss)
-    return res
+    #qloss and ploss are need to be changed
+    qloss = F.binary_cross_entropy_with_logits(hash,bin_hash)
+
+    ploss = F.binary_cross_entropy_with_logits(psb,labels)
+
+    # ploss = F.cross_entropy(psb,hash.detach())
+    # ploss = cross_entropy(psb,labels)
+
+    res = (qloss+ploss)+(imgloss+sketchloss)
+    return res,imgloss,sketchloss,qloss,ploss
 
 def normalize(mx):
     rowsum = np.array(mx.sum(1))
@@ -138,29 +130,23 @@ def qb(binarized_hash,hash):
 def gnn(word2vec,batch_labels,input,hashlen):
     batch_size = len(batch_labels)
     adj = np.zeros((batch_size,batch_size))
-    #import pdb; pdb.set_trace()
     #t0 = time.time()
     for i in range(batch_size):
         for j in range(batch_size):
             adj[i][j] = word2vec.distance(batch_labels[i],batch_labels[j])
     #print(time.time()-t0)
-    adj = normalize(adj)
     adj_d = torch.from_numpy(adj).cuda()
-    input_n = normalize(input.cpu().detach().numpy())
-    input_n = torch.from_numpy(input_n)
-    features = input_n.type(torch.cuda.DoubleTensor)
-
+    features = torch.div(input,input.max()).double()
     return adj_d,features
 
 def stochastic_neurons(hash):
-    random = torch.rand(hash.shape[1]).double().cuda()
-    random_distribution = random.repeat(hash.shape[0],1)
-
+    random_distribution = torch.rand(hash.shape[0],hash.shape[1]).double().cuda()
+    # random_distribution = random.repeat(hash.shape[0],1)
     on = torch.ones(hash.shape[0],hash.shape[1]).double().cuda()
     zr = torch.zeros(hash.shape[0],hash.shape[1]).double().cuda()
     binarized_hash = torch.where(hash>=random_distribution,on,zr)
 
-    return binarized_hash,random
+    return binarized_hash,random_distribution
 
 def save_checkpoint(state, checkpoint, epoch):
     filepath = os.path.join(checkpoint, str(epoch)+'epoch.pth.tar')
@@ -192,13 +178,13 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,enc_i,enc_s
         data_s, data_i, target = Variable(data_s).cuda(), Variable(data_i).cuda(), target
 
         optimizer.zero_grad()
-
         multimodal_s, attn_s = model_s(data_s)
         multimodal_i, attn_i = model_i(data_i)
-        # m = nn.BatchNorm1d(256, affine=False).cuda()
+
+        import pdb; pdb.set_trace()
+
         fx = enc_i(multimodal_i)
         gy = enc_s(multimodal_s)
-
         combined = concat(multimodal_s,multimodal_i)
         # here combined is of size([250,65536])
 
@@ -212,11 +198,8 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,enc_i,enc_s
             semantics.append(word2vec_model.vec(x))
         semantics = torch.from_numpy(np.asarray(semantics)).double().cuda()
 
-        # op1 = qb(binarized_hash,output_hash)
-        # op2 = qb(output_hash,binarized_hash)
-
-        psb = decoder(output_hash,semantics)
-        loss = lossfn(semantics,psb,gy.double(),fx.double(),output_hash,binarized_hash,hashlen)
+        psb,mean,var = decoder(output_hash,semantics)
+        loss,a,b,c,d = lossfn(semantics,psb,mean,var,gy.double(),fx.double(),output_hash,binarized_hash,hashlen)
 
         loss.backward()
         optimizer.step()
@@ -227,6 +210,7 @@ def train(hashlen,decoder,graph_model,word2vec_model,model_s,model_i,enc_i,enc_s
                 100. * batch_idx / len(train_loader), loss.item()))
         logger.add_scalar('loss_train', float(loss.item()))
         logger.step()
+    print(a.item(),b.item(),c.item(),d.item())
 
 def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_data,hashlen):
 
@@ -257,7 +241,7 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     graph_model = net.GCN(nfeat=65536, nhid=1024, nclass=hashlen, dropout=0.4).cuda().double()
     decoder = SemanticDecoder(hashlen).cuda().double()
 
-    optimizer = optim.Adam(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) + list(decoder.parameters()) + list(enc_i.parameters()) + list(enc_s.parameters()), lr=0.01)
+    optimizer = optim.Adam(list(sketch_model.parameters()) + list(image_model.parameters()) + list(enc_i.parameters()) + list(enc_s.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) + list(decoder.parameters()), lr=0.01)
     # optimizer = optim.SGD(list(sketch_model.parameters()) + list(image_model.parameters()) + list(concat.parameters()) + list(graph_model.parameters()) + list(decoder.parameters()), lr=0.01, momentum=0.5)
 
     sketchdir = "saved_models/sketch/"
@@ -270,8 +254,8 @@ def sketch_image_encoder(epochs,logdir,sketch_path,image_path,sketch_data,image_
     for epoch in range(1, num_epochs):
         train(hashlen,decoder,graph_model,word2vec_model,sketch_model,image_model,enc_i,enc_s,concat,optimizer,epoch,train_loader,logger)
         #optimizer = decay_lr(optimizer,epoch)
-        save_checkpoint({'epoch': epoch,'state_dict_1': sketch_model.state_dict(),'stat_dict_2': enc_s.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
-        save_checkpoint({'epoch': epoch,'state_dict_1': image_model.state_dict(), 'stat_dict_2': enc_i.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
+        save_checkpoint({'epoch': epoch,'state_dict_1': sketch_model.state_dict(),'state_dict_2': enc_s.state_dict(),'optim_dict' : optimizer.state_dict()}, sketchdir, epoch)
+        save_checkpoint({'epoch': epoch,'state_dict_1': image_model.state_dict(), 'state_dict_2': enc_i.state_dict(),'optim_dict' : optimizer.state_dict()}, imgdir, epoch)
         test_map = testmap(test_image_loader,test_sketch_loader,sketch_model,image_model,enc_i,enc_s)
         logger.add_scalar('mAP', test_map)
     print("End of training !")

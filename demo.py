@@ -1,3 +1,5 @@
+# Demo for the Sprout computer
+
 from tkinter import *
 from tkinter import ttk,colorchooser,filedialog
 from tkinter.ttk import Progressbar
@@ -183,12 +185,12 @@ class main:
         self.image = net.Net().cuda()
         self.g = net.Encoder(args.hashcode_length).cuda()
         self.f = net.Encoder(args.hashcode_length).cuda()
-        checkpoint_s = torch.load(self.sketch_model+"30epoch.pth.tar")
-        checkpoint_i = torch.load(self.image_model+"30epoch.pth.tar")
+        checkpoint_s = torch.load(self.sketch_model+"1epoch.pth.tar")
+        checkpoint_i = torch.load(self.image_model+"1epoch.pth.tar")
         self.sketch.load_state_dict(checkpoint_s['state_dict_1'])
         self.image.load_state_dict(checkpoint_i['state_dict_1'])
-        self.f.load_state_dict(checkpoint_i['stat_dict_2'])
-        self.g.load_state_dict(checkpoint_s['stat_dict_2'])
+        self.f.load_state_dict(checkpoint_i['state_dict_2'])
+        self.g.load_state_dict(checkpoint_s['state_dict_2'])
         print('Models Loaded...')
 
         #Load a particular directory

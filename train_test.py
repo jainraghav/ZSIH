@@ -22,7 +22,7 @@ def train(model,optimizer,epoch,train_loader,logger):
         # print(data.size(),target.size())
         optimizer.zero_grad()
         #import pdb; pdb.set_trace()
-        output,multimodal_input,attn = model(data)
+        output,attn = model(data)
         # print(output)
         target = target.squeeze_()
         loss = F.cross_entropy(output, target)
@@ -43,7 +43,7 @@ def validate(model,valid_loader,logger):
         for data in valid_loader:
             images, labels = data
             labels = labels.cuda()
-            output,multimodal_input,attn = model(Variable(images).cuda())
+            output,attn = model(Variable(images).cuda())
             _,predicted = torch.max(output,1)
             for i in range(len(images)):
                 a,b = predicted[i].item(),labels[i].item()

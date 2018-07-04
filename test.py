@@ -31,42 +31,37 @@ def testmap(test_img_loader,test_sketch_loader,model_s,model_i,f,g):
         for batch_idx,(data_i,label,_) in enumerate(test_img_loader):
             data_i = data_i.cuda()
             rel_i,mask_i = model_i(data_i)
-            # m = nn.BatchNorm1d(256, affine=False).cuda()
-            # zz = m(rel_i)
             fx = f(rel_i-0.5)
-            fxd = fx.cpu().detach().numpy()
+            fxd = fx.cpu().numpy()
             imageb_hash = (np.sign(fxd)+1)/2
-
+            # imageb_hash = fxd
             all_image_hashes.extend(imageb_hash)
             img_labels.extend(label)
-
         all_sketch_hashes = []
         sketch_labels=[]
         for batch_idx, (data_s, target,_) in enumerate(test_sketch_loader):
             data_s = data_s.cuda()
             rel_s,mask_s = model_s(data_s)
-            # m = nn.BatchNorm1d(256, affine=False).cuda()
-            # yy = m(rel_s)
             gy = g(rel_s-0.5)
-            gyd = gy.cpu().detach().numpy()
+            gyd = gy.cpu().numpy()
             sketchb_hash = (np.sign(gyd)+1)/2
-
+            # sketchb_hash = gyd
             all_sketch_hashes.extend(sketchb_hash)
             sketch_labels.extend(target)
 
     # hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'euclidean')
     hamm_d = cdist(all_sketch_hashes, all_image_hashes, 'hamming')
     #Sort-Slice-mAP@100
-    hamm_d.sort(axis=1)
+    # hamm_d.sort(axis=1)
     # import pdb; pdb.set_trace()
     str_sim = (np.expand_dims(sketch_labels, axis=1) == np.expand_dims(img_labels, axis=0)) * 1
     nq = str_sim.shape[0]
     num_cores = min(multiprocessing.cpu_count(), 32)
 
-    hamm_d = hamm_d[0:nq,0:100] #to calc mAP@100
-    str_sim = str_sim[0:nq,0:100]
+    # hamm_d = hamm_d[0:nq,0:100] #to calc mAP@100
+    # str_sim = str_sim[0:nq,0:100]
     hamm_d = 1 - hamm_d
-    aps = Parallel(n_jobs=num_cores)(delayed(average_precision_score)(str_sim[iq], hamm_d[iq]) for iq in range(100))
+    aps = Parallel(n_jobs=num_cores)(delayed(average_precision_score)(str_sim[iq], hamm_d[iq]) for iq in range(nq))
     map_ = np.mean(aps)
     print('Mean Average Precision {map:.4f}'.format(map=map_))
     return map_
